@@ -320,6 +320,24 @@ impl View {
                         ctx.copy_text(mailing_list);
                         ui.close_menu();
                     }
+
+                    if ui
+                        .button(t!("map.context_menu.copy_town_bbcode"))
+                        .clicked()
+                    {
+                        // BBCode links for the selected towns, sorted by id, joined as
+                        // "[town]3857[/town] [town]1287[/town] [town]3227[/town]".
+                        let mut town_ids: Vec<u32> =
+                            self.selected_town_ids.iter().copied().collect();
+                        town_ids.sort_unstable();
+                        let bbcode = town_ids
+                            .into_iter()
+                            .map(|id| format!("[town]{id}[/town]"))
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        ctx.copy_text(bbcode);
+                        ui.close_menu();
+                    }
                 });
 
                 // POPUP WITH TOWN INFORMATION
