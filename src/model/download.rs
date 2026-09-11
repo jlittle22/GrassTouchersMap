@@ -118,7 +118,7 @@ impl DataTable {
         let server_id = api_results.lock().unwrap().for_server.clone();
 
         #[cfg(target_arch = "wasm32")]
-        let base_url = format!("https://reflector.gmap.turun.de/{server_id}/");
+        let base_url = format!("https://reflector.grasstouchers.gg/{server_id}/");
         #[cfg(not(target_arch = "wasm32"))]
         let base_url = format!("https://{server_id}.grepolis.com/data/");
 
