@@ -50,6 +50,21 @@ pub fn parse_current_url() -> (
     return (search_param_string_opt, server_id, selections);
 }
 
+/// Format unix seconds in the viewer's local time zone, matching the native slider's labels.
+pub fn format_local_time(unix_secs: u64) -> String {
+    #[allow(clippy::cast_precision_loss)]
+    let date = js_sys::Date::new(&JsValue::from_f64(unix_secs as f64 * 1000.0));
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        date.get_full_year(),
+        date.get_month() + 1,
+        date.get_date(),
+        date.get_hours(),
+        date.get_minutes(),
+        date.get_seconds()
+    )
+}
+
 /// Convert the given arguments into a urlencoded string. e.g. /?server=de99&selections=base64encodedSelections
 /// and then set the current window url to that.
 pub fn set_current_url(text: &str) {

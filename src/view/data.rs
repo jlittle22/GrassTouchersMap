@@ -6,9 +6,13 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_arch = "wasm32")]
+use crate::model::download::SnapshotHistory;
 use crate::selection::TownSelection;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::storage::SavedDB;
+#[cfg(target_arch = "wasm32")]
+use std::sync::Mutex;
 use crate::town::Town;
 use crate::view::preferences::{DarkModePref, Preferences};
 
@@ -45,15 +49,23 @@ pub struct Data {
     #[cfg(not(target_arch = "wasm32"))]
     pub saved_db: BTreeMap<String, Vec<SavedDB>>,
 
-    /// index into the chronologically sorted (oldest first) list of saved snapshots
-    /// for `server_id`, used by the history slider to know which snapshot is shown.
+    /// index into the chronologically sorted (oldest first) list of snapshots for
+    /// `server_id`, used by the history slider. `None` means the newest one.
     #[serde(skip)]
-    #[cfg(not(target_arch = "wasm32"))]
     pub history_index: Option<usize>,
 
     #[serde(skip)]
     #[cfg(target_arch = "wasm32")]
     pub url: Option<String>,
+
+    /// snapshots the reflector has archived, backing the history slider on the web
+    #[serde(skip)]
+    #[cfg(target_arch = "wasm32")]
+    pub remote_history: Option<SnapshotHistory>,
+
+    #[serde(skip)]
+    #[cfg(target_arch = "wasm32")]
+    pub pending_history: Option<Arc<Mutex<Option<SnapshotHistory>>>>,
 
     pub preferences: Preferences,
 }
@@ -76,10 +88,13 @@ impl Default for Data {
             },
             #[cfg(not(target_arch = "wasm32"))]
             saved_db: BTreeMap::new(),
-            #[cfg(not(target_arch = "wasm32"))]
             history_index: None,
             #[cfg(target_arch = "wasm32")]
             url: None,
+            #[cfg(target_arch = "wasm32")]
+            remote_history: None,
+            #[cfg(target_arch = "wasm32")]
+            pending_history: None,
             preferences: Preferences::default(),
         }
     }

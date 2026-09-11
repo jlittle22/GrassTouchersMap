@@ -67,9 +67,14 @@ impl Presenter {
     /// This is deliberately its own method, because the self.model = `Model::Uninit` needs to be triggered before the
     /// normal message processing.
     pub fn load_server(&mut self, server: String) {
+        self.load_server_at(server, None);
+    }
+
+    /// like `load_server`, but for the archived snapshot at `at` (unix seconds) if given
+    pub fn load_server_at(&mut self, server: String, at: Option<u64>) {
         let api_response = Arc::new(Mutex::new(APIResponse::new(server)));
         self.model = Model::Uninitialized(Arc::clone(&api_response));
-        DataTable::get_api_results(&Arc::clone(&api_response));
+        DataTable::get_api_results(&Arc::clone(&api_response), at);
     }
 
     /// triggers the server loading, which is handled asynchronously

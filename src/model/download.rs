@@ -113,37 +113,73 @@ Building, unit and research information
 
 */
 
+/// Snapshot times (unix seconds, oldest first) the reflector has archived for a world.
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SnapshotHistory {
+    pub server: String,
+    pub snapshots: Vec<u64>,
+}
+
+/// The slot stays `None` until the reflector answers. Any failure counts as "no history".
+#[cfg(target_arch = "wasm32")]
+pub fn fetch_history(server_id: &str) -> Arc<Mutex<Option<SnapshotHistory>>> {
+    let slot = Arc::new(Mutex::new(None));
+    let this_slot = Arc::clone(&slot);
+    let url = format!("https://reflector.grasstouchers.gg/{server_id}/history");
+    let server = server_id.to_owned();
+    ehttp::fetch(ehttp::Request::get(url), move |response| {
+        let history = response
+            .ok()
+            .filter(|response| response.ok)
+            .and_then(|response| serde_json::from_slice(&response.bytes).ok())
+            .unwrap_or(SnapshotHistory {
+                server,
+                snapshots: Vec::new(),
+            });
+        *this_slot.lock().unwrap() = Some(history);
+    });
+    slot
+}
+
 impl DataTable {
-    pub fn get_api_results(api_results: &Arc<Mutex<APIResponse>>) {
+    /// `at` selects an archived snapshot (unix seconds). Only the reflector has those.
+    pub fn get_api_results(api_results: &Arc<Mutex<APIResponse>>, at: Option<u64>) {
         let server_id = api_results.lock().unwrap().for_server.clone();
 
         #[cfg(target_arch = "wasm32")]
-        let base_url = format!("https://reflector.grasstouchers.gg/{server_id}/");
+        let (base_url, query) = (
+            format!("https://reflector.grasstouchers.gg/{server_id}/"),
+            at.map(|t| format!("?at={t}")).unwrap_or_default(),
+        );
         #[cfg(not(target_arch = "wasm32"))]
-        let base_url = format!("https://{server_id}.grepolis.com/data/");
+        let (base_url, query) = {
+            debug_assert!(at.is_none(), "native loads history from local files instead");
+            (format!("https://{server_id}.grepolis.com/data/"), String::new())
+        };
 
-        let req_players = ehttp::Request::get(base_url.clone() + "players.txt");
+        let req_players = ehttp::Request::get(base_url.clone() + "players.txt" + &query);
         let these_api_results = Arc::clone(api_results);
         ehttp::fetch(req_players, move |response| {
             let text = String::from_utf8(response.unwrap().bytes).unwrap();
             these_api_results.lock().unwrap().players = Some(text);
         });
 
-        let req_players = ehttp::Request::get(base_url.clone() + "alliances.txt");
+        let req_players = ehttp::Request::get(base_url.clone() + "alliances.txt" + &query);
         let these_api_results = Arc::clone(api_results);
         ehttp::fetch(req_players, move |response| {
             let text = String::from_utf8(response.unwrap().bytes).unwrap();
             these_api_results.lock().unwrap().alliances = Some(text);
         });
 
-        let req_players = ehttp::Request::get(base_url.clone() + "towns.txt");
+        let req_players = ehttp::Request::get(base_url.clone() + "towns.txt" + &query);
         let these_api_results = Arc::clone(api_results);
         ehttp::fetch(req_players, move |response| {
             let text = String::from_utf8(response.unwrap().bytes).unwrap();
             these_api_results.lock().unwrap().towns = Some(text);
         });
 
-        let req_players = ehttp::Request::get(base_url.clone() + "islands.txt");
+        let req_players = ehttp::Request::get(base_url.clone() + "islands.txt" + &query);
         let these_api_results = Arc::clone(api_results);
         ehttp::fetch(req_players, move |response| {
             let text = String::from_utf8(response.unwrap().bytes).unwrap();

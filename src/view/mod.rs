@@ -9,6 +9,8 @@ mod sidepanel;
 
 use crate::emptyconstraint::EmptyConstraint;
 use crate::emptyselection::EmptyTownSelection;
+#[cfg(target_arch = "wasm32")]
+use crate::model::download;
 use crate::presenter::Presenter;
 use crate::presenter::PresenterReady;
 use crate::selection::TownSelection;
@@ -255,10 +257,7 @@ impl View {
             ghost_towns: Arc::new(Vec::new()),
             ..self.ui_data.clone()
         };
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.ui_data.history_index = None;
-        }
+        self.ui_data.history_index = None;
 
         for selection in &mut self.ui_data.selections {
             selection.towns = Arc::new(Vec::new());
@@ -361,58 +360,42 @@ impl View {
                 .unwrap_or_default();
             history_for_server.sort_by_key(|saved_db| saved_db.date);
 
-            if history_for_server.len() > 1 {
-                let max_index = history_for_server.len() - 1;
-                let mut index = self
-                    .ui_data
-                    .history_index
-                    .unwrap_or(max_index)
-                    .min(max_index);
+            let picked = history_slider(
+                ui,
+                history_for_server.len(),
+                &mut self.ui_data.history_index,
+                |index| {
+                    history_for_server
+                        .get(index)
+                        .map_or_else(String::new, std::string::ToString::to_string)
+                },
+            );
+            if let Some(saved_db) = picked.and_then(|index| history_for_server.get(index).cloned()) {
+                let server_id = self.ui_data.server_id.clone();
+                self.switch_to_saved_db(server_id, saved_db);
+            }
+        }
 
-                let response = ui
-                    .horizontal(|ui| {
-                        ui.label(t!("sidepanel.header.history_slider"));
-                        ui.add(
-                            egui::Slider::new(&mut index, 0..=max_index).custom_formatter(
-                                |value, _range| {
-                                    history_for_server
-                                        .get(value as usize)
-                                        .map_or_else(String::new, std::string::ToString::to_string)
-                                },
-                            ),
-                        )
-                    })
-                    .inner;
-
-                // egui::Slider already steps via left/right arrow keys once it has keyboard
-                // focus. As a convenience also let left/right step through history when the
-                // slider is *not* focused, as long as nothing else (e.g. the server id text
-                // field) is currently capturing the keyboard.
-                let mut changed = response.changed();
-                if !response.has_focus() && !ui.ctx().wants_keyboard_input() {
-                    let (pressed_left, pressed_right) = ui.ctx().input(|input| {
-                        (
-                            input.key_pressed(egui::Key::ArrowLeft),
-                            input.key_pressed(egui::Key::ArrowRight),
-                        )
-                    });
-                    if pressed_left && index > 0 {
-                        index -= 1;
-                        changed = true;
-                    } else if pressed_right && index < max_index {
-                        index += 1;
-                        changed = true;
-                    }
-                }
-                self.ui_data.history_index = Some(index);
-
-                if changed {
-                    if let Some(saved_db) = history_for_server.get(index).cloned() {
-                        let server_id = self.ui_data.server_id.clone();
-                        self.switch_to_saved_db(server_id, saved_db);
-                        self.ui_data.history_index = Some(index);
-                    }
-                }
+        // on the web the snapshots come from the reflector's archive instead of local files
+        #[cfg(target_arch = "wasm32")]
+        {
+            let history: Vec<u64> = self
+                .ui_data
+                .remote_history
+                .as_ref()
+                .filter(|history| history.server == self.ui_data.server_id)
+                .map(|history| history.snapshots.clone())
+                .unwrap_or_default();
+            let picked = history_slider(ui, history.len(), &mut self.ui_data.history_index, |index| {
+                history
+                    .get(index)
+                    .map_or_else(String::new, |&t| wasm_utils::format_local_time(t))
+            });
+            if let Some(index) = picked {
+                // the newest point is whatever the reflector currently serves live
+                let at = (index + 1 < history.len()).then(|| history[index]);
+                self.presenter
+                    .load_server_at(self.ui_data.server_id.clone(), at);
             }
         }
 
@@ -521,12 +504,32 @@ impl eframe::App for View {
                 {
                     self.ui_data.saved_db = storage::get_list_of_saved_dbs();
                 }
+
+                // likewise ask the reflector which snapshots it has archived for this world
+                #[cfg(target_arch = "wasm32")]
+                {
+                    self.ui_data.pending_history =
+                        Some(download::fetch_history(&self.ui_data.server_id));
+                }
             }
             Err(err) => {
                 // crashed when trying to convert API Response into our backend data structure
                 eprintln!("Backend Crashed with the following error:\n{err}");
                 self.ui_state = State::Uninitialized(Progress::BackendCrashed(format!("{err}")));
             }
+        }
+
+        // keep showing the previous history until the new list has arrived, so the slider
+        // doesn't flicker away while it's being refreshed
+        #[cfg(target_arch = "wasm32")]
+        if let Some(history) = self
+            .ui_data
+            .pending_history
+            .as_ref()
+            .and_then(|slot| slot.lock().unwrap().take())
+        {
+            self.ui_data.remote_history = Some(history);
+            self.ui_data.pending_history = None;
         }
 
         // the above is book keeping. Now we call the rendering code.
@@ -563,4 +566,53 @@ impl eframe::App for View {
             }
         };
     }
+}
+
+/// A slider over `len` snapshots, oldest to newest, shown only when there are at least two.
+/// `index` is `None` while the newest snapshot is selected, so the slider keeps following
+/// the newest one as more arrive. Returns the index the user just moved to, if any.
+fn history_slider(
+    ui: &mut Ui,
+    len: usize,
+    index: &mut Option<usize>,
+    label: impl Fn(usize) -> String,
+) -> Option<usize> {
+    if len < 2 {
+        return None;
+    }
+    let max_index = len - 1;
+    let mut current = index.unwrap_or(max_index).min(max_index);
+
+    let response = ui
+        .horizontal(|ui| {
+            ui.label(t!("sidepanel.header.history_slider"));
+            ui.add(
+                egui::Slider::new(&mut current, 0..=max_index)
+                    .custom_formatter(|value, _range| label(value as usize)),
+            )
+        })
+        .inner;
+
+    // egui::Slider already steps via left/right arrow keys once it has keyboard
+    // focus. As a convenience also let left/right step through history when the
+    // slider is *not* focused, as long as nothing else (e.g. the server id text
+    // field) is currently capturing the keyboard.
+    let mut changed = response.changed();
+    if !response.has_focus() && !ui.ctx().wants_keyboard_input() {
+        let (pressed_left, pressed_right) = ui.ctx().input(|input| {
+            (
+                input.key_pressed(egui::Key::ArrowLeft),
+                input.key_pressed(egui::Key::ArrowRight),
+            )
+        });
+        if pressed_left && current > 0 {
+            current -= 1;
+            changed = true;
+        } else if pressed_right && current < max_index {
+            current += 1;
+            changed = true;
+        }
+    }
+    *index = (current < max_index).then_some(current);
+    changed.then_some(current)
 }
