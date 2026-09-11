@@ -32,6 +32,9 @@ base64 = "0.22.1"
 web-sys = { version = "0.3", features = [
     "History",
     "UrlSearchParams",
+    "Window",
+    "Navigator",
+    "Clipboard", # context menu copy actions, see wasm_utils::copy_to_clipboard
     # access to the dom to hide the loading text and access to the current url 
 ] }
 wasm-bindgen = "0.2.99"

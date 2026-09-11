@@ -60,6 +60,27 @@ pub fn set_current_url(text: &str) {
     // res.expect("failed to update history state");
 }
 
+/// Write text to the system clipboard via the browser Clipboard API.
+/// eframe 0.26 only does this itself when built with RUSTFLAGS='--cfg=web_sys_unstable_apis'
+/// (which doesn't compile against current web-sys), so `ctx.copy_text` is a silent no-op on the web.
+pub fn copy_to_clipboard(text: &str) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let clipboard = window.navigator().clipboard();
+    // navigator.clipboard is undefined outside of secure contexts (plain http)
+    if clipboard.is_undefined() {
+        log::error!("Clipboard API unavailable (page not served over https?)");
+        return;
+    }
+    let promise = clipboard.write_text(text);
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Err(err) = wasm_bindgen_futures::JsFuture::from(promise).await {
+            log::error!("Failed to copy to clipboard: {err:?}");
+        }
+    });
+}
+
 /// Convert the given arguments into a urlencoded string. e.g. /?server=de99&selections=base64encodedSelections
 pub fn state_to_url_string(
     server_id: Option<&str>,

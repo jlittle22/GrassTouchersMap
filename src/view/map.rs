@@ -11,6 +11,17 @@ use super::{
 /// highlight the ctrl+drag rectangle selection and the towns it picks out.
 const SELECTION_GREEN: egui::Color32 = egui::Color32::from_rgb(143, 199, 62);
 
+/// `ctx.copy_text` does nothing on the web with our eframe build, see `wasm_utils::copy_to_clipboard`.
+fn copy_text(ctx: &egui::Context, text: String) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = ctx;
+        crate::wasm_utils::copy_to_clipboard(&text);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    ctx.copy_text(text);
+}
+
 impl View {
     #[allow(clippy::too_many_lines)] // UI Code, am I right, hahah
     pub fn ui_map(&mut self, ctx: &egui::Context) {
@@ -317,7 +328,7 @@ impl View {
                             .filter_map(|town| town.player_name.as_deref())
                             .collect();
                         let mailing_list = owners.into_iter().collect::<Vec<_>>().join("; ");
-                        ctx.copy_text(mailing_list);
+                        copy_text(ctx, mailing_list);
                         ui.close_menu();
                     }
 
@@ -335,7 +346,7 @@ impl View {
                             .map(|id| format!("[town]{id}[/town]"))
                             .collect::<Vec<_>>()
                             .join(" ");
-                        ctx.copy_text(bbcode);
+                        copy_text(ctx, bbcode);
                         ui.close_menu();
                     }
 
@@ -359,7 +370,7 @@ impl View {
                             let summary = format!(
                                 "{count} towns | avg {avg:.0} pts | min {min} | max {max}"
                             );
-                            ctx.copy_text(summary);
+                            copy_text(ctx, summary);
                         }
                         ui.close_menu();
                     }
