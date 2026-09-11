@@ -227,12 +227,12 @@ impl View {
         let native_options = eframe::NativeOptions {
             // defaults to window title, but we include the version in the window title. Since
             // it should stay the same across version changes we give it a fixed value here.
-            viewport: egui::ViewportBuilder::default().with_app_id("Grass Touchers LLC Map"),
+            viewport: egui::ViewportBuilder::default().with_app_id("Grass Touchers Map"),
             ..eframe::NativeOptions::default()
         };
         let version = env!("CARGO_PKG_VERSION");
         eframe::run_native(
-            &format!("Grass Touchers LLC Map {version}"),
+            &format!("Grass Touchers Map {version}"),
             native_options,
             Box::new(|cc| Box::new(View::setup(cc))),
         )
