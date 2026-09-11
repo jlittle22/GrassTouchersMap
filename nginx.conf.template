@@ -5,6 +5,9 @@ server {
     index index.html;
 
     location / {
+        # file names aren't content-hashed (Trunk.toml filehash = false), so make browsers
+        # revalidate every time instead of heuristically caching an old build
+        add_header Cache-Control "no-cache" always;
         try_files $uri $uri/ /index.html;
     }
 }
