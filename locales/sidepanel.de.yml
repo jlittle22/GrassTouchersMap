@@ -6,6 +6,19 @@ sidepanel:
     saved_file_entry: "%{server_id}: %{db}"
     no_saved_files: "Keine gespeicherten Dateien gefunden"
     history_slider: "Verlauf:"
+  history:
+    live: "Live"
+    range: "Zeitraum"
+    granularity: "Granularität"
+    all: "Alles"
+    six_hours: "6 Stunden"
+    twelve_hours: "12 Stunden"
+    one_day: "1 Tag"
+    three_days: "3 Tage"
+    one_week: "1 Woche"
+    two_weeks: "2 Wochen"
+    one_month: "1 Monat"
+    three_months: "3 Monate"
   loading:
     db_crashed: "Die Datenbank ist abgestürzt. Bitte die Daten nochmal laden. Die Fehlermeldung ist:\n%{reason}"
   town_stats:

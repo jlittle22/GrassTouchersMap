@@ -6,6 +6,19 @@ sidepanel:
     saved_file_entry: "%{server_id} : %{db}"
     no_saved_files: "Aucun fichier enregistré trouvé"
     history_slider: "Historique :"
+  history:
+    live: "En direct"
+    range: "Période"
+    granularity: "Granularité"
+    all: "Tout"
+    six_hours: "6 heures"
+    twelve_hours: "12 heures"
+    one_day: "1 jour"
+    three_days: "3 jours"
+    one_week: "1 semaine"
+    two_weeks: "2 semaines"
+    one_month: "1 mois"
+    three_months: "3 mois"
   loading:
     db_crashed: "La base de données a planté. Veuillez recharger les données. Le message d'erreur est :\n%{reason}"
   town_stats:

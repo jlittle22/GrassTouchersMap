@@ -14,6 +14,7 @@ use crate::storage::SavedDB;
 #[cfg(target_arch = "wasm32")]
 use std::sync::Mutex;
 use crate::town::Town;
+use crate::view::history::HistorySettings;
 use crate::view::preferences::{DarkModePref, Preferences};
 
 pub const ALL_TOWNS_DARK: egui::Color32 = egui::Color32::from_gray(60);
@@ -49,10 +50,14 @@ pub struct Data {
     #[cfg(not(target_arch = "wasm32"))]
     pub saved_db: BTreeMap<String, Vec<SavedDB>>,
 
-    /// index into the chronologically sorted (oldest first) list of snapshots for
-    /// `server_id`, used by the history slider. `None` means the newest one.
+    /// time (unix seconds) of the snapshot chosen on the history slider for `server_id`.
+    /// `None` means the newest point.
     #[serde(skip)]
-    pub history_index: Option<usize>,
+    pub history_selected: Option<u64>,
+
+    /// time range and granularity of the history slider
+    #[serde(default)]
+    pub history_settings: HistorySettings,
 
     #[serde(skip)]
     #[cfg(target_arch = "wasm32")]
@@ -88,7 +93,8 @@ impl Default for Data {
             },
             #[cfg(not(target_arch = "wasm32"))]
             saved_db: BTreeMap::new(),
-            history_index: None,
+            history_selected: None,
+            history_settings: HistorySettings::default(),
             #[cfg(target_arch = "wasm32")]
             url: None,
             #[cfg(target_arch = "wasm32")]
