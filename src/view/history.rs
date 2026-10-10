@@ -128,12 +128,14 @@ pub fn visible_points(times: &[u64], settings: HistorySettings, utc_offset: i64)
 pub enum Picked {
     /// index into the `times` given to `history_row`
     Snapshot(usize),
-    Live,
+    /// the final point after the snapshots
+    Latest,
 }
 
 /// The history row: a slider over the snapshots at `times` (unix seconds, oldest first),
-/// thinned by `settings`, followed by a "Live" point if `live`, and a dropdown to change
-/// `settings`. Shown only when there are at least two points.
+/// thinned by `settings`, and a dropdown to change `settings`. `latest` labels a final point
+/// for data newer than every snapshot, if there is any. Shown only when there are at least
+/// two points.
 ///
 /// `selected` is the chosen snapshot's time, `None` for the newest point, so the slider keeps
 /// following the newest one as more arrive. Returns the point to load: the one the user just
@@ -141,17 +143,18 @@ pub enum Picked {
 pub fn history_row(
     ui: &mut Ui,
     times: &[u64],
-    live: bool,
+    latest: Option<&str>,
     settings: &mut HistorySettings,
     selected: &mut Option<u64>,
     label: impl Fn(usize) -> String,
 ) -> Option<Picked> {
-    if times.len() + usize::from(live) < 2 {
+    let extra = usize::from(latest.is_some());
+    if times.len() + extra < 2 {
         return None;
     }
     let visible = visible_points(times, *settings, local_utc_offset());
-    // slider positions: the visible snapshots, then the live point
-    let max_index = visible.len() + usize::from(live) - 1;
+    // slider positions: the visible snapshots, then the latest point
+    let max_index = visible.len() + extra - 1;
     let mut current = match *selected {
         None => max_index,
         Some(t) => visible.iter().rposition(|&i| times[i] <= t).unwrap_or(0),
@@ -160,24 +163,17 @@ pub fn history_row(
     let point_label = |position: usize| {
         visible
             .get(position)
-            .map_or_else(|| t!("sidepanel.history.live"), |&i| label(i))
+            .map_or_else(|| latest.unwrap_or_default().to_owned(), |&i| label(i))
     };
 
     let slider_response = ui
         .horizontal(|ui| {
             ui.label(t!("sidepanel.header.history_slider"));
-            let slider_response = (max_index > 0).then(|| {
-                ui.add(
-                    egui::Slider::new(&mut current, 0..=max_index)
-                        .custom_formatter(|value, _range| {
-                            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                            point_label(value as usize)
-                        }),
-                )
-            });
-            if max_index == 0 {
-                ui.label(point_label(0));
-            }
+            // the slider's own value display is an editable number field, so show the
+            // time as a plain label instead
+            let slider_response = (max_index > 0)
+                .then(|| ui.add(egui::Slider::new(&mut current, 0..=max_index).show_value(false)));
+            ui.label(point_label(current));
             settings_menu(ui, settings);
             slider_response
         })
@@ -187,8 +183,12 @@ pub fn history_row(
     // focus. As a convenience also let left/right step through history when the
     // slider is *not* focused, as long as nothing else (e.g. the server id text
     // field) is currently capturing the keyboard.
-    let has_focus = slider_response.as_ref().is_some_and(egui::Response::has_focus);
-    changed |= slider_response.as_ref().is_some_and(egui::Response::changed);
+    let has_focus = slider_response
+        .as_ref()
+        .is_some_and(egui::Response::has_focus);
+    changed |= slider_response
+        .as_ref()
+        .is_some_and(egui::Response::changed);
     if !has_focus && !ui.ctx().wants_keyboard_input() {
         let (pressed_left, pressed_right) = ui.ctx().input(|input| {
             (
@@ -204,11 +204,15 @@ pub fn history_row(
             changed = true;
         }
     }
+    if changed {
+        // the label above was drawn before the arrow keys moved `current`
+        ui.ctx().request_repaint();
+    }
     *selected = (current < max_index).then(|| times[visible[current]]);
     changed.then(|| {
         visible
             .get(current)
-            .map_or(Picked::Live, |&i| Picked::Snapshot(i))
+            .map_or(Picked::Latest, |&i| Picked::Snapshot(i))
     })
 }
 

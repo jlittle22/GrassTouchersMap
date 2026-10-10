@@ -55,6 +55,17 @@ pub fn parse_current_url() -> (
     return (search_param_string_opt, server_id, selections);
 }
 
+/// Parse an HTTP date, e.g. a `Last-Modified` header, into unix seconds.
+pub fn parse_http_date(text: &str) -> Option<u64> {
+    let millis = js_sys::Date::parse(text);
+    if !millis.is_finite() || millis < 0.0 {
+        return None;
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let secs = (millis / 1000.0) as u64;
+    Some(secs)
+}
+
 /// Format unix seconds in the viewer's local time zone, matching the native slider's labels.
 pub fn format_local_time(unix_secs: u64) -> String {
     #[allow(clippy::cast_precision_loss)]

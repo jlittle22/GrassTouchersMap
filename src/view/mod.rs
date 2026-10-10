@@ -368,14 +368,16 @@ impl View {
             let picked = history::history_row(
                 ui,
                 &times,
-                false,
+                None,
                 &mut self.ui_data.history_settings,
                 &mut self.ui_data.history_selected,
                 |index| history_for_server[index].to_string(),
             );
             if let Some(history::Picked::Snapshot(index)) = picked {
-                let server_id = self.ui_data.server_id.clone();
-                self.switch_to_saved_db(server_id, history_for_server[index].clone());
+                // like `switch_to_saved_db`, but holding an arrow key must not abandon
+                // every load before it finishes
+                self.presenter
+                    .load_server_from_file_when_idle(history_for_server[index].clone());
             }
         }
 
@@ -389,11 +391,16 @@ impl View {
                 .filter(|history| history.server == self.ui_data.server_id)
                 .map(|history| history.snapshots.clone())
                 .unwrap_or_default();
-            // the archive holds at most one snapshot per 6 hours, so live data follows them
+            // the reflector's current data follows the snapshots when it's newer than all of them
+            let latest = self
+                .presenter
+                .current_data_time(&self.ui_data.server_id)
+                .filter(|&time| history.last().is_some_and(|&newest| time > newest))
+                .map(wasm_utils::format_local_time);
             let picked = history::history_row(
                 ui,
                 &history,
-                true,
+                latest.as_deref(),
                 &mut self.ui_data.history_settings,
                 &mut self.ui_data.history_selected,
                 |index| wasm_utils::format_local_time(history[index]),
@@ -401,10 +408,10 @@ impl View {
             if let Some(picked) = picked {
                 let at = match picked {
                     history::Picked::Snapshot(index) => Some(history[index]),
-                    history::Picked::Live => None,
+                    history::Picked::Latest => None,
                 };
                 self.presenter
-                    .load_server_at(self.ui_data.server_id.clone(), at);
+                    .load_server_at_when_idle(self.ui_data.server_id.clone(), at);
             }
         }
 
@@ -478,6 +485,8 @@ impl eframe::App for View {
                 ctx.request_repaint_after(Duration::from_millis(50));
             }
             Ok(PresenterReady::NewlyReady) => {
+                // the next frame starts any load queued while this one was running
+                ctx.request_repaint();
                 // trigger all the data refreshes that are required when loading new data
                 self.ui_state = State::Show;
                 self.ui_data.ghost_towns = self.presenter.get_ghost_towns();

@@ -7,7 +7,6 @@ sidepanel:
     no_saved_files: "No saved files found"
     history_slider: "History:"
   history:
-    live: "Live"
     range: "Time range"
     granularity: "Granularity"
     all: "All"

@@ -18,9 +18,27 @@ pub enum PresenterReady {
     NewlyReady,
 }
 
+/// a request to load data, see `Presenter::load_when_idle`
+enum Load {
+    /// the server's data, or its archived snapshot at the given unix seconds
+    Server(String, Option<u64>),
+    #[cfg(not(target_arch = "wasm32"))]
+    File(SavedDB),
+}
+
 pub struct Presenter {
     model: Model,
     max_cache_size: CacheSize,
+    /// whether `model` is waiting for a load that was actually started
+    loading: bool,
+    /// the load to start once the current one has finished and been shown
+    queued: Option<Load>,
+    /// the snapshot being loaded, `None` for the reflector's current data
+    #[cfg(target_arch = "wasm32")]
+    loading_at: Option<u64>,
+    /// server and `Last-Modified` of the reflector's current data, as of its last load
+    #[cfg(target_arch = "wasm32")]
+    current_data_time: Option<(String, u64)>,
 }
 
 impl Default for Presenter {
@@ -28,6 +46,12 @@ impl Default for Presenter {
         Self {
             model: Model::Uninitialized(Arc::new(Mutex::new(APIResponse::new(String::new())))),
             max_cache_size: CacheSize::Normal,
+            loading: false,
+            queued: None,
+            #[cfg(target_arch = "wasm32")]
+            loading_at: None,
+            #[cfg(target_arch = "wasm32")]
+            current_data_time: None,
         }
     }
 }
@@ -72,9 +96,54 @@ impl Presenter {
 
     /// like `load_server`, but for the archived snapshot at `at` (unix seconds) if given
     pub fn load_server_at(&mut self, server: String, at: Option<u64>) {
-        let api_response = Arc::new(Mutex::new(APIResponse::new(server)));
-        self.model = Model::Uninitialized(Arc::clone(&api_response));
-        DataTable::get_api_results(&Arc::clone(&api_response), at);
+        self.queued = None;
+        self.start(Load::Server(server, at));
+    }
+
+    /// like `load_server_at`, but if a load is still running it isn't abandoned: this one
+    /// starts after it has finished, replacing any load queued before. When the history
+    /// slider steps faster than snapshots load, each step would otherwise abandon the
+    /// running load and the map would never update until the steps stop.
+    pub fn load_server_at_when_idle(&mut self, server: String, at: Option<u64>) {
+        self.load_when_idle(Load::Server(server, at));
+    }
+
+    fn load_when_idle(&mut self, load: Load) {
+        if self.loading {
+            self.queued = Some(load);
+        } else {
+            self.start(load);
+        }
+    }
+
+    fn start(&mut self, load: Load) {
+        self.loading = true;
+        match load {
+            Load::Server(server, at) => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    self.loading_at = at;
+                }
+                let api_response = Arc::new(Mutex::new(APIResponse::new(server)));
+                self.model = Model::Uninitialized(Arc::clone(&api_response));
+                DataTable::get_api_results(&Arc::clone(&api_response), at);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            Load::File(saved_db) => {
+                let api_response = Arc::new(Mutex::new(APIResponse::new(String::new())));
+                self.model = Model::Uninitialized(Arc::clone(&api_response));
+                APIResponse::load_from_file(saved_db, api_response);
+            }
+        }
+    }
+
+    /// when the reflector's current data for `server` was generated, if it has been loaded
+    #[cfg(target_arch = "wasm32")]
+    pub fn current_data_time(&self, server: &str) -> Option<u64> {
+        self.current_data_time
+            .as_ref()
+            .filter(|(loaded_server, _)| loaded_server == server)
+            .map(|&(_, time)| time)
     }
 
     /// triggers the server loading, which is handled asynchronously
@@ -82,9 +151,14 @@ impl Presenter {
     /// normal message processing.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn load_server_from_file(&mut self, saved_db: SavedDB) {
-        let api_response = Arc::new(Mutex::new(APIResponse::new(String::new())));
-        self.model = Model::Uninitialized(Arc::clone(&api_response));
-        APIResponse::load_from_file(saved_db, api_response);
+        self.queued = None;
+        self.start(Load::File(saved_db));
+    }
+
+    /// like `load_server_from_file`, but waits for a running load, see `load_server_at_when_idle`
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn load_server_from_file_when_idle(&mut self, saved_db: SavedDB) {
+        self.load_when_idle(Load::File(saved_db));
     }
 
     /// return a list of all towns in the current model with no constraints applied.
@@ -192,9 +266,17 @@ impl Presenter {
                 if !api_response.is_complete() {
                     return Ok(PresenterReady::WaitingForAPI);
                 }
+                self.loading = false;
 
                 #[cfg(not(target_arch = "wasm32"))]
                 api_response.save_to_file();
+
+                #[cfg(target_arch = "wasm32")]
+                if self.loading_at.is_none() {
+                    self.current_data_time = api_response
+                        .last_modified
+                        .map(|time| (api_response.for_server.clone(), time));
+                }
 
                 let db = DataTable::create_for_world(api_response);
                 self.model = Model::Loaded {
@@ -204,7 +286,14 @@ impl Presenter {
                 };
                 return Ok(PresenterReady::NewlyReady);
             }
-            Model::Loaded { .. } => return Ok(PresenterReady::AlwaysHasBeen),
+            Model::Loaded { .. } => {
+                // the previous load has been shown for a frame, now start the queued one
+                if let Some(load) = self.queued.take() {
+                    self.start(load);
+                    return Ok(PresenterReady::WaitingForAPI);
+                }
+                return Ok(PresenterReady::AlwaysHasBeen);
+            }
         }
     }
 

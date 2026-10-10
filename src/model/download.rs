@@ -121,6 +121,22 @@ pub struct SnapshotHistory {
     pub snapshots: Vec<u64>,
 }
 
+/// Keep the newest `Last-Modified` seen across the files of one load.
+#[cfg(target_arch = "wasm32")]
+fn note_last_modified(api_results: &mut APIResponse, response: &ehttp::Response) {
+    if let Some(time) = response
+        .headers
+        .get("last-modified")
+        .and_then(crate::wasm_utils::parse_http_date)
+    {
+        api_results.last_modified = Some(
+            api_results
+                .last_modified
+                .map_or(time, |known| known.max(time)),
+        );
+    }
+}
+
 /// The slot stays `None` until the reflector answers. Any failure counts as "no history".
 #[cfg(target_arch = "wasm32")]
 pub fn fetch_history(server_id: &str) -> Arc<Mutex<Option<SnapshotHistory>>> {
@@ -154,29 +170,44 @@ impl DataTable {
         );
         #[cfg(not(target_arch = "wasm32"))]
         let (base_url, query) = {
-            debug_assert!(at.is_none(), "native loads history from local files instead");
-            (format!("https://{server_id}.grepolis.com/data/"), String::new())
+            debug_assert!(
+                at.is_none(),
+                "native loads history from local files instead"
+            );
+            (
+                format!("https://{server_id}.grepolis.com/data/"),
+                String::new(),
+            )
         };
 
         let req_players = ehttp::Request::get(base_url.clone() + "players.txt" + &query);
         let these_api_results = Arc::clone(api_results);
         ehttp::fetch(req_players, move |response| {
-            let text = String::from_utf8(response.unwrap().bytes).unwrap();
-            these_api_results.lock().unwrap().players = Some(text);
+            let response = response.unwrap();
+            let mut api_results = these_api_results.lock().unwrap();
+            #[cfg(target_arch = "wasm32")]
+            note_last_modified(&mut api_results, &response);
+            api_results.players = Some(String::from_utf8(response.bytes).unwrap());
         });
 
         let req_players = ehttp::Request::get(base_url.clone() + "alliances.txt" + &query);
         let these_api_results = Arc::clone(api_results);
         ehttp::fetch(req_players, move |response| {
-            let text = String::from_utf8(response.unwrap().bytes).unwrap();
-            these_api_results.lock().unwrap().alliances = Some(text);
+            let response = response.unwrap();
+            let mut api_results = these_api_results.lock().unwrap();
+            #[cfg(target_arch = "wasm32")]
+            note_last_modified(&mut api_results, &response);
+            api_results.alliances = Some(String::from_utf8(response.bytes).unwrap());
         });
 
         let req_players = ehttp::Request::get(base_url.clone() + "towns.txt" + &query);
         let these_api_results = Arc::clone(api_results);
         ehttp::fetch(req_players, move |response| {
-            let text = String::from_utf8(response.unwrap().bytes).unwrap();
-            these_api_results.lock().unwrap().towns = Some(text);
+            let response = response.unwrap();
+            let mut api_results = these_api_results.lock().unwrap();
+            #[cfg(target_arch = "wasm32")]
+            note_last_modified(&mut api_results, &response);
+            api_results.towns = Some(String::from_utf8(response.bytes).unwrap());
         });
 
         let req_players = ehttp::Request::get(base_url.clone() + "islands.txt" + &query);

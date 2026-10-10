@@ -7,7 +7,6 @@ sidepanel:
     no_saved_files: "Aucun fichier enregistré trouvé"
     history_slider: "Historique :"
   history:
-    live: "En direct"
     range: "Période"
     granularity: "Granularité"
     all: "Tout"

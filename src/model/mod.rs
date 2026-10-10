@@ -46,6 +46,11 @@ pub struct APIResponse {
     alliances: Option<String>,
     towns: Option<String>,
     islands: Option<String>,
+
+    /// newest `Last-Modified` of players, alliances and towns, in unix seconds
+    #[cfg(target_arch = "wasm32")]
+    #[serde(skip)]
+    pub last_modified: Option<u64>,
 }
 
 impl APIResponse {
@@ -73,6 +78,7 @@ impl APIResponse {
                 alliances: None,
                 towns: None,
                 islands: None,
+                last_modified: None,
             }
         }
     }

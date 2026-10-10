@@ -11,11 +11,11 @@ use crate::model::download::SnapshotHistory;
 use crate::selection::TownSelection;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::storage::SavedDB;
-#[cfg(target_arch = "wasm32")]
-use std::sync::Mutex;
 use crate::town::Town;
 use crate::view::history::HistorySettings;
 use crate::view::preferences::{DarkModePref, Preferences};
+#[cfg(target_arch = "wasm32")]
+use std::sync::Mutex;
 
 pub const ALL_TOWNS_DARK: egui::Color32 = egui::Color32::from_gray(60);
 pub const ALL_TOWNS_LIGHT: egui::Color32 = egui::Color32::from_gray(180);
