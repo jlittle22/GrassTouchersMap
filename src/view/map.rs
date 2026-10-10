@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use egui::Shape;
 
 use crate::town::Town;
@@ -20,6 +22,70 @@ fn copy_text(ctx: &egui::Context, text: String) {
     }
     #[cfg(not(target_arch = "wasm32"))]
     ctx.copy_text(text);
+}
+
+/// One `[quote]` block per owner, in the same layout as DIO-Tools' town list, but signed
+/// with our own link:
+///
+/// ```text
+/// [quote][size=9][player]Frayte[/player] ([ally]Grass Touchers[/ally])[/size] (2 Cities)
+/// [table]
+/// [*]1.[|][town]3135[/town][|]14937 points[|]Ocean 44[/*]
+/// [*]2.[|][town]3503[/town][|]12965 points[|]Ocean 44[/*]
+/// [/table][url=https://map.grasstouchers.gg]Grass Touchers Map[/url] - v.2.0.2[/quote]
+/// ```
+///
+/// Owners are sorted by name with ghost towns last, towns within an owner by id.
+fn town_bbcode(towns: &[&Town]) -> String {
+    let mut by_owner: std::collections::BTreeMap<(bool, &str), Vec<&Town>> =
+        std::collections::BTreeMap::new();
+    for &town in towns {
+        let key = match town.player_name.as_deref() {
+            Some(name) => (false, name),
+            None => (true, ""),
+        };
+        by_owner.entry(key).or_default().push(town);
+    }
+
+    let footer = format!(
+        "[url=https://map.grasstouchers.gg]Grass Touchers Map[/url] - v.{}",
+        env!("CARGO_PKG_VERSION")
+    );
+
+    by_owner
+        .into_values()
+        .map(|mut owned| {
+            owned.sort_unstable_by_key(|town| town.id);
+            let first = owned[0];
+            let owner = match (&first.player_name, &first.alliance_name) {
+                (Some(player), Some(ally)) => {
+                    format!("[player]{player}[/player] ([ally]{ally}[/ally])")
+                }
+                (Some(player), None) => format!("[player]{player}[/player]"),
+                (None, _) => "Ghost towns".to_owned(),
+            };
+            let cities = if owned.len() == 1 { "City" } else { "Cities" };
+            let mut rows = String::new();
+            for (i, town) in owned.iter().enumerate() {
+                // oceans are 100x100 squares, numbered x then y: (447, 462) is ocean 44.
+                // Coordinates are always within 0..1000, so the casts are safe.
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let ocean = (town.x as u32 / 100) * 10 + town.y as u32 / 100;
+                let _ = writeln!(
+                    rows,
+                    "[*]{}.[|][town]{}[/town][|]{} points[|]Ocean {ocean}[/*]",
+                    i + 1,
+                    town.id,
+                    town.points
+                );
+            }
+            format!(
+                "[quote][size=9]{owner}[/size] ({} {cities})\n[table]\n{rows}[/table]{footer}[/quote]",
+                owned.len()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 impl View {
@@ -130,21 +196,24 @@ impl View {
                 } else {
                     self.marquee_drag_start = None;
                 }
-                let marquee_rect = ctrl_held.then(|| self.marquee_drag_start).flatten().and_then(
-                    |start| {
+                let marquee_rect = ctrl_held
+                    .then(|| self.marquee_drag_start)
+                    .flatten()
+                    .and_then(|start| {
                         response
                             .interact_pointer_pos()
                             .or_else(|| response.hover_pos())
                             .map(|current| egui::Rect::from_two_pos(start, current))
-                    },
-                );
+                    });
                 if let Some(rect) = marquee_rect {
                     if response.drag_released() {
                         self.selected_town_ids = rendered_towns
                             .iter()
                             .filter(|town| {
                                 rect.contains(
-                                    canvas_data.world_to_screen(egui::vec2(town.x, town.y)).to_pos2(),
+                                    canvas_data
+                                        .world_to_screen(egui::vec2(town.x, town.y))
+                                        .to_pos2(),
                                 )
                             })
                             .map(|town| town.id)
@@ -332,20 +401,16 @@ impl View {
                         ui.close_menu();
                     }
 
-                    if ui
-                        .button(t!("map.context_menu.copy_town_bbcode"))
-                        .clicked()
-                    {
-                        // BBCode links for the selected towns, sorted by id, joined as
-                        // "[town]3857[/town] [town]1287[/town] [town]3227[/town]".
-                        let mut town_ids: Vec<u32> =
-                            self.selected_town_ids.iter().copied().collect();
-                        town_ids.sort_unstable();
-                        let bbcode = town_ids
-                            .into_iter()
-                            .map(|id| format!("[town]{id}[/town]"))
-                            .collect::<Vec<_>>()
-                            .join(" ");
+                    if ui.button(t!("map.context_menu.copy_town_bbcode")).clicked() {
+                        // DIO-Tools style town table per owner, see `town_bbcode`.
+                        // all_towns already includes the ghost towns.
+                        let towns: Vec<&Town> = self
+                            .ui_data
+                            .all_towns
+                            .iter()
+                            .filter(|town| self.selected_town_ids.contains(&town.id))
+                            .collect();
+                        let bbcode = town_bbcode(&towns);
                         copy_text(ctx, bbcode);
                         ui.close_menu();
                     }
@@ -367,9 +432,8 @@ impl View {
                             let avg = sum as f64 / count as f64;
                             let min = points.iter().min().unwrap();
                             let max = points.iter().max().unwrap();
-                            let summary = format!(
-                                "{count} towns | avg {avg:.0} pts | min {min} | max {max}"
-                            );
+                            let summary =
+                                format!("{count} towns | avg {avg:.0} pts | min {min} | max {max}");
                             copy_text(ctx, summary);
                         }
                         ui.close_menu();
@@ -428,11 +492,9 @@ impl View {
                 );
                 ui.put(
                     logo_rect,
-                    egui::Image::new(egui::include_image!(
-                        "../../assets/grass_touchers_logo.png"
-                    ))
-                    .max_size(logo_max_size)
-                    .maintain_aspect_ratio(true),
+                    egui::Image::new(egui::include_image!("../../assets/grass_touchers_logo.png"))
+                        .max_size(logo_max_size)
+                        .maintain_aspect_ratio(true),
                 );
 
                 response
