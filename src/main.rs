@@ -14,6 +14,9 @@ mod emptyselection;
 mod model;
 mod presenter;
 mod selection;
+// share links only exist on the web, but the format is tested natively
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+mod share_link;
 mod telemetry;
 mod town;
 mod view;

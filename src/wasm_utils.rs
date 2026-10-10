@@ -7,6 +7,7 @@ use web_sys;
 
 use crate::emptyselection::EmptyTownSelection;
 use crate::selection::TownSelection;
+use crate::share_link;
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 
 fn get_current_url_search_param_string() -> Option<String> {
@@ -38,14 +39,18 @@ pub fn parse_current_url() -> (
     let url_params = url_params_opt.unwrap();
 
     let server_id = url_params.get("server");
-    let selections = url_params
-        .get("selections")
-        .map(|b64str| URL_SAFE.decode(b64str).ok())
-        .flatten()
-        .map(|bytes| String::from_utf8(bytes).ok())
-        .flatten()
-        .map(|selections_str| EmptyTownSelection::try_from_str(&selections_str).ok())
-        .flatten();
+    let selections = match url_params.get("s") {
+        Some(text) => share_link::decode(&text),
+        // links shared before the compact format still carry base64url YAML
+        None => url_params
+            .get("selections")
+            .map(|b64str| URL_SAFE.decode(b64str).ok())
+            .flatten()
+            .map(|bytes| String::from_utf8(bytes).ok())
+            .flatten()
+            .map(|selections_str| EmptyTownSelection::try_from_str(&selections_str).ok())
+            .flatten(),
+    };
 
     return (search_param_string_opt, server_id, selections);
 }
@@ -96,7 +101,7 @@ pub fn copy_to_clipboard(text: &str) {
     });
 }
 
-/// Convert the given arguments into a urlencoded string. e.g. /?server=de99&selections=base64encodedSelections
+/// Convert the given arguments into a urlencoded string. e.g. /?server=de99&s=compactSelections
 pub fn state_to_url_string(
     server_id: Option<&str>,
     selections: Option<&[TownSelection]>,
@@ -108,9 +113,9 @@ pub fn state_to_url_string(
     }
     if let Some(selections) = selections {
         if !selections.is_empty() {
-            let text = serde_yaml::to_string(selections).unwrap();
-            let text = URL_SAFE.encode(text);
-            url_parts.push(format!("selections={text}"));
+            let selections: Vec<EmptyTownSelection> =
+                selections.iter().map(TownSelection::partial_clone).collect();
+            url_parts.push(format!("s={}", share_link::encode(&selections)));
         }
     }
     url_text.push_str(&url_parts.join("&"));
