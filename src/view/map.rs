@@ -24,68 +24,48 @@ fn copy_text(ctx: &egui::Context, text: String) {
     ctx.copy_text(text);
 }
 
-/// One `[quote]` block per owner, in the same layout as DIO-Tools' town list, but signed
-/// with our own link:
+/// One `[quote]` table of every selected town, in DIO-Tools' town list layout with an
+/// added player column, signed with our own link:
 ///
 /// ```text
-/// [quote][size=9][player]Frayte[/player] ([ally]Grass Touchers[/ally])[/size] (2 Cities)
+/// [quote][size=9]2 Cities[/size]
 /// [table]
-/// [*]1.[|][town]3135[/town][|]14937 points[|]Ocean 44[/*]
-/// [*]2.[|][town]3503[/town][|]12965 points[|]Ocean 44[/*]
+/// [*]1.[|][town]3135[/town][|][player]Frayte[/player][|]14937 points[|]Ocean 44[/*]
+/// [*]2.[|][town]3503[/town][|][player]Frayte[/player][|]12965 points[|]Ocean 44[/*]
 /// [/table][url=https://map.grasstouchers.gg]Grass Touchers Map[/url] - v.2.0.2[/quote]
 /// ```
 ///
-/// Owners are sorted by name with ghost towns last, towns within an owner by id.
+/// Towns are sorted by id. Ghost towns get an empty player cell.
 fn town_bbcode(towns: &[&Town]) -> String {
-    let mut by_owner: std::collections::BTreeMap<(bool, &str), Vec<&Town>> =
-        std::collections::BTreeMap::new();
-    for &town in towns {
-        let key = match town.player_name.as_deref() {
-            Some(name) => (false, name),
-            None => (true, ""),
-        };
-        by_owner.entry(key).or_default().push(town);
-    }
+    let mut towns = towns.to_vec();
+    towns.sort_unstable_by_key(|town| town.id);
 
-    let footer = format!(
-        "[url=https://map.grasstouchers.gg]Grass Touchers Map[/url] - v.{}",
+    let cities = if towns.len() == 1 { "City" } else { "Cities" };
+    let mut bbcode = format!("[quote][size=9]{} {cities}[/size]\n[table]\n", towns.len());
+    for (i, town) in towns.iter().enumerate() {
+        let player = town
+            .player_name
+            .as_deref()
+            .map(|name| format!("[player]{name}[/player]"))
+            .unwrap_or_default();
+        // oceans are 100x100 squares, numbered x then y: (447, 462) is ocean 44.
+        // Coordinates are always within 0..1000, so the casts are safe.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let ocean = (town.x as u32 / 100) * 10 + town.y as u32 / 100;
+        let _ = writeln!(
+            bbcode,
+            "[*]{}.[|][town]{}[/town][|]{player}[|]{} points[|]Ocean {ocean}[/*]",
+            i + 1,
+            town.id,
+            town.points
+        );
+    }
+    let _ = write!(
+        bbcode,
+        "[/table][url=https://map.grasstouchers.gg]Grass Touchers Map[/url] - v.{}[/quote]",
         env!("CARGO_PKG_VERSION")
     );
-
-    by_owner
-        .into_values()
-        .map(|mut owned| {
-            owned.sort_unstable_by_key(|town| town.id);
-            let first = owned[0];
-            let owner = match (&first.player_name, &first.alliance_name) {
-                (Some(player), Some(ally)) => {
-                    format!("[player]{player}[/player] ([ally]{ally}[/ally])")
-                }
-                (Some(player), None) => format!("[player]{player}[/player]"),
-                (None, _) => "Ghost towns".to_owned(),
-            };
-            let cities = if owned.len() == 1 { "City" } else { "Cities" };
-            let mut rows = String::new();
-            for (i, town) in owned.iter().enumerate() {
-                // oceans are 100x100 squares, numbered x then y: (447, 462) is ocean 44.
-                // Coordinates are always within 0..1000, so the casts are safe.
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                let ocean = (town.x as u32 / 100) * 10 + town.y as u32 / 100;
-                let _ = writeln!(
-                    rows,
-                    "[*]{}.[|][town]{}[/town][|]{} points[|]Ocean {ocean}[/*]",
-                    i + 1,
-                    town.id,
-                    town.points
-                );
-            }
-            format!(
-                "[quote][size=9]{owner}[/size] ({} {cities})\n[table]\n{rows}[/table]{footer}[/quote]",
-                owned.len()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    bbcode
 }
 
 impl View {
@@ -402,7 +382,7 @@ impl View {
                     }
 
                     if ui.button(t!("map.context_menu.copy_town_bbcode")).clicked() {
-                        // DIO-Tools style town table per owner, see `town_bbcode`.
+                        // one DIO-Tools style table of all the towns, see `town_bbcode`.
                         // all_towns already includes the ghost towns.
                         let towns: Vec<&Town> = self
                             .ui_data
