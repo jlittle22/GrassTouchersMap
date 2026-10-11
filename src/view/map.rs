@@ -6,12 +6,21 @@ use crate::town::Town;
 
 use super::{
     data::{CanvasData, ViewPortFilter},
+    screenshot::Scene,
     View,
 };
 
 /// brand's lightish green (sampled from assets/grass_touchers_logo.png), used to
 /// highlight the ctrl+drag rectangle selection and the towns it picks out.
 const SELECTION_GREEN: egui::Color32 = egui::Color32::from_rgb(143, 199, 62);
+
+/// where the logo overlay goes, fixed to the map's top left corner regardless of pan/zoom
+fn logo_rect(map: egui::Rect) -> egui::Rect {
+    egui::Rect::from_min_size(
+        map.left_top() + egui::vec2(8.0, 8.0),
+        egui::vec2(48.0, 48.0),
+    )
+}
 
 /// `ctx.copy_text` does nothing on the web with our eframe build, see `wasm_utils::copy_to_clipboard`.
 fn copy_text(ctx: &egui::Context, text: String) {
@@ -25,12 +34,10 @@ fn copy_text(ctx: &egui::Context, text: String) {
 }
 
 /// One `[quote]` table of every selected town, in DIO-Tools' town list layout with an
-/// added player column, under a minimap of them rendered by the reflector, signed with our
-/// own link:
+/// added player column, signed with our own link:
 ///
 /// ```text
 /// [quote][size=9]2 Cities[/size]
-/// [img]https://reflector.grasstouchers.gg/us145/minimap/3135-3503.png[/img]
 /// [table]
 /// [*]1.[|][town]3135[/town][|][player]Frayte[/player][|]14937 points[|]Ocean 44[/*]
 /// [*]2.[|][town]3503[/town][|][player]Frayte[/player][|]12965 points[|]Ocean 44[/*]
@@ -38,27 +45,12 @@ fn copy_text(ctx: &egui::Context, text: String) {
 /// ```
 ///
 /// Towns are sorted by id. Ghost towns get an empty player cell.
-fn town_bbcode(server_id: &str, towns: &[&Town]) -> String {
-    /// the reflector's limit for one minimap
-    const MAX_MINIMAP_TOWNS: usize = 2000;
-
+fn town_bbcode(towns: &[&Town]) -> String {
     let mut towns = towns.to_vec();
     towns.sort_unstable_by_key(|town| town.id);
 
     let cities = if towns.len() == 1 { "City" } else { "Cities" };
-    let mut bbcode = format!("[quote][size=9]{} {cities}[/size]\n", towns.len());
-    if !towns.is_empty() && towns.len() <= MAX_MINIMAP_TOWNS {
-        let ids = towns
-            .iter()
-            .map(|town| town.id.to_string())
-            .collect::<Vec<_>>()
-            .join("-");
-        let _ = writeln!(
-            bbcode,
-            "[img]https://reflector.grasstouchers.gg/{server_id}/minimap/{ids}.png[/img]"
-        );
-    }
-    bbcode.push_str("[table]\n");
+    let mut bbcode = format!("[quote][size=9]{} {cities}[/size]\n[table]\n", towns.len());
     for (i, town) in towns.iter().enumerate() {
         let player = town
             .player_name
@@ -85,6 +77,8 @@ impl View {
     #[allow(clippy::too_many_lines)] // UI Code, am I right, hahah
     pub fn ui_map(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            // the canvas frame's fill, for screenshots
+            let background = ui.visuals().extreme_bg_color;
             egui::Frame::canvas(ui.style()).show(ui, |ui| {
                 let (mut response, painter) = ui.allocate_painter(
                     ui.available_size_before_wrap(),
@@ -403,8 +397,97 @@ impl View {
                             .iter()
                             .filter(|town| self.selected_town_ids.contains(&town.id))
                             .collect();
-                        let bbcode = town_bbcode(&self.ui_data.server_id, &towns);
+                        let bbcode = town_bbcode(&towns);
                         copy_text(ctx, bbcode);
+                        ui.close_menu();
+                    }
+
+                    if ui
+                        .button(t!("map.context_menu.copy_screenshot_link"))
+                        .clicked()
+                    {
+                        // the same layers as the drawing above, in the same order
+                        let to_screen = |town: &Town| {
+                            canvas_data
+                                .world_to_screen(egui::vec2(town.x, town.y))
+                                .to_pos2()
+                        };
+                        let town_radius = canvas_data.scale_world_to_screen(0.15);
+                        let mut scene =
+                            Scene::new(response.rect, ctx.pixels_per_point(), background);
+                        for i in (0u16..=10).map(|i| f32::from(i) * 100.0) {
+                            for (from, to) in [
+                                (egui::vec2(0.0, i), egui::vec2(1000.0, i)),
+                                (egui::vec2(i, 0.0), egui::vec2(i, 1000.0)),
+                            ] {
+                                scene.line(
+                                    canvas_data.world_to_screen(from).to_pos2(),
+                                    canvas_data.world_to_screen(to).to_pos2(),
+                                    2.0,
+                                    egui::Color32::DARK_GRAY,
+                                    None,
+                                );
+                            }
+                        }
+                        if canvas_data.zoom > 5.0 {
+                            for i in (0u16..=100)
+                                .map(|i| f32::from(i) * 10.0)
+                                .filter(|&i| filter.x_in_viewport(i) || filter.y_in_viewport(i))
+                            {
+                                for (from, to) in [
+                                    (egui::vec2(0.0, i), egui::vec2(1000.0, i)),
+                                    (egui::vec2(i, 0.0), egui::vec2(i, 1000.0)),
+                                ] {
+                                    scene.line(
+                                        canvas_data.world_to_screen(from).to_pos2(),
+                                        canvas_data.world_to_screen(to).to_pos2(),
+                                        1.0,
+                                        egui::Color32::DARK_GRAY,
+                                        Some((7.0, 7.0)),
+                                    );
+                                }
+                            }
+                        }
+                        if self.ui_data.settings_all.enabled {
+                            scene.dots(
+                                self.ui_data.settings_all.color,
+                                1.0 + town_radius,
+                                visible_towns_all.iter().map(|t| to_screen(t)),
+                            );
+                        }
+                        if self.ui_data.settings_ghosts.enabled {
+                            scene.dots(
+                                self.ui_data.settings_ghosts.color,
+                                2.0 + town_radius,
+                                visible_ghost_towns.iter().map(|t| to_screen(t)),
+                            );
+                        }
+                        for selection in &self.ui_data.selections {
+                            if !selection.is_hidden() {
+                                scene.dots(
+                                    selection.color,
+                                    1.0 + town_radius,
+                                    selection
+                                        .towns
+                                        .iter()
+                                        .filter(|t| filter.town_in_viewport(t))
+                                        .map(to_screen),
+                                );
+                            }
+                        }
+                        if !self.selected_town_ids.is_empty() {
+                            scene.rings(
+                                SELECTION_GREEN,
+                                3.0 + town_radius,
+                                2.0,
+                                rendered_towns
+                                    .iter()
+                                    .filter(|t| self.selected_town_ids.contains(&t.id))
+                                    .map(|t| to_screen(t)),
+                            );
+                        }
+                        scene.logo(logo_rect(response.rect));
+                        copy_text(ctx, scene.upload());
                         ui.close_menu();
                     }
 
@@ -478,15 +561,11 @@ impl View {
                 }
 
                 // LOGO OVERLAY, fixed to the top left corner of the map regardless of pan/zoom
-                let logo_max_size = egui::vec2(48.0, 48.0);
-                let logo_rect = egui::Rect::from_min_size(
-                    response.rect.left_top() + egui::vec2(8.0, 8.0),
-                    logo_max_size,
-                );
+                let logo_rect = logo_rect(response.rect);
                 ui.put(
                     logo_rect,
                     egui::Image::new(egui::include_image!("../../assets/grass_touchers_logo.png"))
-                        .max_size(logo_max_size)
+                        .max_size(logo_rect.size())
                         .maintain_aspect_ratio(true),
                 );
 

@@ -4,3 +4,4 @@ map:
     copy_mailing_list: "Copier la liste de diffusion"
     copy_town_bbcode: "Copier le BBCode des villes"
     copy_stats: "Copier les statistiques de la sélection"
+    copy_screenshot_link: "Copier le lien de la capture d'écran"

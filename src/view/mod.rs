@@ -4,6 +4,7 @@ pub(crate) mod eye_toggle;
 mod history;
 mod map;
 mod menu;
+mod screenshot;
 pub(crate) mod preferences;
 mod selectable_label;
 mod sidepanel;
