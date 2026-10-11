@@ -22,6 +22,16 @@ impl View {
                     "sidepanel.town_stats.ghosts",
                     count = self.ui_data.ghost_towns.len()
                 ));
+                ui.label(t!(
+                    "sidepanel.town_stats.islands",
+                    count = self.ui_data.all_islands.len(),
+                    free = self
+                        .ui_data
+                        .all_islands
+                        .iter()
+                        .map(|island| u32::from(island.free_slots))
+                        .sum::<u32>()
+                ));
                 ui.separator();
 
                 ui.horizontal(|ui| {
@@ -33,6 +43,11 @@ impl View {
                     super::eye_toggle::eye_toggle(ui, &mut self.ui_data.settings_ghosts.enabled);
                     ui.label(t!("sidepanel.town_toggle.ghosts"));
                     ui.color_edit_button_srgba(&mut self.ui_data.settings_ghosts.color);
+                });
+                ui.horizontal(|ui| {
+                    super::eye_toggle::eye_toggle(ui, &mut self.ui_data.settings_islands.enabled);
+                    ui.label(t!("sidepanel.town_toggle.islands"));
+                    ui.color_edit_button_srgba(&mut self.ui_data.settings_islands.color);
                 });
                 ui.separator();
 
@@ -62,6 +77,15 @@ impl View {
                         ui.separator();
                     }
 
+                    // the edits above (e.g. switching a selection between towns and islands)
+                    // must be visible to the selections that reference the edited one
+                    let all_selections: Vec<EmptyTownSelection> = self
+                        .ui_data
+                        .selections
+                        .iter()
+                        .map(TownSelection::partial_clone)
+                        .collect();
+
                     // process selections which need a refresh
                     // let mut all_dependent_selections = HashSet::new();
                     for (index, refresh) in refresh_list {
@@ -70,6 +94,7 @@ impl View {
                             super::Refresh::Complete => {
                                 // println!("refresh complete selection for {selection}");
                                 selection.towns = Arc::new(Vec::new());
+                                selection.islands = Arc::new(Vec::new());
                                 HashSet::new()
                             }
                             super::Refresh::InSitu(edited_constraints) => {

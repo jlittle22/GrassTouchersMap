@@ -23,6 +23,8 @@ sidepanel:
   town_stats:
     total: "Total Towns: %{count}"
     ghosts: "Ghost Towns: %{count}"
+    islands: "Islands: %{count} (%{free} free slots)"
   town_toggle:
     all: "All Towns:"
     ghosts: "Ghost Towns:"
+    islands: "Islands:"

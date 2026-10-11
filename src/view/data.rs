@@ -6,6 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use crate::island::Island;
 #[cfg(target_arch = "wasm32")]
 use crate::model::download::SnapshotHistory;
 use crate::selection::TownSelection;
@@ -19,6 +20,15 @@ use std::sync::Mutex;
 
 pub const ALL_TOWNS_DARK: egui::Color32 = egui::Color32::from_gray(60);
 pub const ALL_TOWNS_LIGHT: egui::Color32 = egui::Color32::from_gray(180);
+/// island outlines, a muted sea-ish gray that reads on dark and light backgrounds
+pub const ISLANDS: egui::Color32 = egui::Color32::from_rgb(88, 112, 128);
+
+fn default_settings_islands() -> DefaultTownGroup {
+    DefaultTownGroup {
+        enabled: true,
+        color: ISLANDS,
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
@@ -38,6 +48,9 @@ pub struct Data {
 
     pub settings_all: DefaultTownGroup,
     pub settings_ghosts: DefaultTownGroup,
+    /// island outlines and free slots, drawn under the towns once zoomed in
+    #[serde(default = "default_settings_islands")]
+    pub settings_islands: DefaultTownGroup,
 
     pub selections: Vec<TownSelection>,
 
@@ -45,6 +58,9 @@ pub struct Data {
     pub all_towns: Arc<Vec<Town>>,
     #[serde(skip)]
     pub ghost_towns: Arc<Vec<Town>>,
+    /// every island with town slots
+    #[serde(skip)]
+    pub all_islands: Arc<Vec<Island>>,
 
     #[serde(skip)]
     #[cfg(not(target_arch = "wasm32"))]
@@ -82,6 +98,7 @@ impl Default for Data {
             canvas: None,
             all_towns: Arc::new(Vec::new()),
             ghost_towns: Arc::new(Vec::new()),
+            all_islands: Arc::new(Vec::new()),
             selections: vec![TownSelection::default()],
             settings_ghosts: DefaultTownGroup {
                 enabled: false,
@@ -91,6 +108,7 @@ impl Default for Data {
                 enabled: true,
                 color: ALL_TOWNS_DARK,
             },
+            settings_islands: default_settings_islands(),
             #[cfg(not(target_arch = "wasm32"))]
             saved_db: BTreeMap::new(),
             history_selected: None,
@@ -208,6 +226,12 @@ impl ViewPortFilter {
             && town.x < self.world_r
             && self.world_t < town.y
             && town.y < self.world_b
+    }
+
+    /// whether any of the island (at most 8 world units across) can be in the viewport
+    pub fn island_in_viewport(&self, island: &Island) -> bool {
+        let (x, y) = (f32::from(island.x), f32::from(island.y));
+        self.world_l < x + 8.0 && x < self.world_r && self.world_t < y + 8.0 && y < self.world_b
     }
 
     pub fn x_in_viewport(&self, x: f32) -> bool {

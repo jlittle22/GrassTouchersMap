@@ -1,5 +1,10 @@
 selection:
   town_count: "%{count} Towns"
+  island_count: "%{count} Islands"
+  target:
+    towns: "Towns"
+    islands: "Islands"
+    hint: "Switch between selecting towns and selecting islands. An island selection matches islands by their own attributes, or islands with at least one town matching a town attribute."
 
   player_id: "PlayerID"
   player_name: ""
@@ -22,7 +27,7 @@ selection:
     island_x: "IslandX"
     island_y: "IslandY"
     island_type: "IslandType"
-    island_towns: "IslandTowns"
+    island_towns: "IslandFreeSlots"
     island_resmore: "IslandResMore"
     island_resless: "IslandResLess"
 

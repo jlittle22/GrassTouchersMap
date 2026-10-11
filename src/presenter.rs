@@ -2,6 +2,7 @@ use eframe::epaint::ahash::HashMap;
 
 use crate::emptyconstraint::EmptyConstraint;
 use crate::emptyselection::EmptyTownSelection;
+use crate::island::Island;
 use crate::model::database::DataTable;
 use crate::model::{APIResponse, Model};
 use crate::town::Town;
@@ -171,6 +172,27 @@ impl Presenter {
         self.model.get_ghost_towns()
     }
 
+    /// every island with town slots in the current model
+    pub fn get_all_islands(&mut self) -> Arc<Vec<Island>> {
+        self.model.get_all_islands()
+    }
+
+    /// the islands matching an island selection with all its constraints
+    pub fn islands_for_selection(
+        &mut self,
+        selection: &EmptyTownSelection,
+        all_selections: &[EmptyTownSelection],
+    ) -> anyhow::Result<Arc<Vec<Island>>> {
+        let filled_constraints: Vec<EmptyConstraint> = selection
+            .constraints
+            .iter()
+            .filter(|c| !c.value.is_empty())
+            .cloned()
+            .collect();
+        self.model
+            .get_islands_for_constraints(selection, &filled_constraints, all_selections)
+    }
+
     /// return a list of all the towns that match a given selection with all its constraints.
     pub fn towns_for_selection(
         &mut self,
@@ -283,6 +305,7 @@ impl Presenter {
                     db,
                     cache_strings: HashMap::default(),
                     cache_towns: HashMap::default(),
+                    cache_islands: HashMap::default(),
                 };
                 return Ok(PresenterReady::NewlyReady);
             }

@@ -23,6 +23,8 @@ sidepanel:
   town_stats:
     total: "Sädte gesamt: %{count}"
     ghosts: "Geisterstädte: %{count}"
+    islands: "Inseln: %{count} (%{free} freie Plätze)"
   town_toggle:
     all: "Alle Städte:"
     ghosts: "Geisterstädte:"
+    islands: "Inseln:"

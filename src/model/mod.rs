@@ -1,6 +1,7 @@
 use crate::constraint::ConstraintType;
 use crate::emptyconstraint::EmptyConstraint;
-use crate::emptyselection::EmptyTownSelection;
+use crate::emptyselection::{EmptyTownSelection, SelectionTarget};
+use crate::island::Island;
 use crate::selection::AndOr;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -19,7 +20,7 @@ use time::{OffsetDateTime, UtcOffset};
 
 pub(crate) mod database;
 pub mod download;
-mod offset_data;
+pub(crate) mod offset_data;
 #[cfg(not(target_arch = "wasm32"))]
 mod parse_sqlite;
 
@@ -30,6 +31,7 @@ type StringCacheKey = (
     ConstraintType,
     Vec<EmptyConstraint>,
     AndOr,
+    SelectionTarget,
     BTreeSet<EmptyTownSelection>,
 );
 type TownCacheKey = (Vec<EmptyConstraint>, AndOr, BTreeSet<EmptyTownSelection>);
@@ -184,6 +186,8 @@ pub enum Model {
         db: database::DataTable,
         cache_strings: HashMap<StringCacheKey, (f32, Arc<Vec<String>>)>,
         cache_towns: HashMap<TownCacheKey, (f32, Arc<Vec<Town>>)>,
+        /// island selections, keyed like `cache_towns`
+        cache_islands: HashMap<TownCacheKey, (f32, Arc<Vec<Island>>)>,
     },
 }
 
@@ -223,6 +227,7 @@ impl Model {
             Model::Loaded {
                 cache_strings,
                 cache_towns,
+                cache_islands,
                 ..
             } => {
                 // Alternatives to the current aging method could incorporate something between LeastRecentlyUsed cache, time base cache and LeastOftenUsed cache.
@@ -230,6 +235,7 @@ impl Model {
                 age_and_filter_hashmap(cache_strings, keep_count);
                 // print!("Towns  : ");
                 age_and_filter_hashmap(cache_towns, keep_count);
+                age_and_filter_hashmap(cache_islands, keep_count);
             }
         }
     }
@@ -273,6 +279,47 @@ impl Model {
         }
     }
 
+    /// like `get_towns_for_constraints`, for island selections
+    pub fn get_islands_for_constraints(
+        &mut self,
+        selection: &EmptyTownSelection,
+        constraints: &[EmptyConstraint],
+        all_selections: &[EmptyTownSelection],
+    ) -> anyhow::Result<Arc<Vec<Island>>> {
+        match self {
+            Model::Uninitialized(_) => Ok(Arc::new(Vec::new())),
+            Model::Loaded {
+                db, cache_islands, ..
+            } => {
+                let mut this_selection = selection.clone();
+                this_selection.constraints = constraints.to_vec();
+
+                let referenced_selections =
+                    this_selection.all_referenced_selections(all_selections)?;
+
+                let key = (
+                    constraints.to_vec(),
+                    selection.constraint_join_mode,
+                    referenced_selections,
+                );
+                let value = match cache_islands.entry(key) {
+                    Entry::Occupied(entry) => {
+                        let tuple = entry.into_mut();
+                        tuple.0 += 1.0;
+                        tuple.1.clone()
+                    }
+                    Entry::Vacant(entry) => {
+                        let value = Arc::new(
+                            db.get_islands_for_constraints(&this_selection, all_selections),
+                        );
+                        entry.insert((1.0, value)).1.clone()
+                    }
+                };
+                Ok(value)
+            }
+        }
+    }
+
     /// get a list of all values in the DB for the given `constraint_type` which match the
     /// given `constraints`. For a selection that is joined with `AndOr::Or` this is the same as
     /// `self.get_names_for_constraint_type`. For selections joined with `AndOr::And` this is said
@@ -300,6 +347,7 @@ impl Model {
                     constraint_type,
                     constraints.to_vec(),
                     selection.constraint_join_mode,
+                    selection.target,
                     referenced_selections,
                 );
                 let value = match cache_strings.entry(key) {
@@ -346,6 +394,14 @@ impl Model {
         match self {
             Model::Uninitialized(_) => Arc::new(Vec::new()),
             Model::Loaded { db, .. } => Arc::new(db.get_all_towns()),
+        }
+    }
+
+    /// every island with town slots
+    pub fn get_all_islands(&self) -> Arc<Vec<Island>> {
+        match self {
+            Model::Uninitialized(_) => Arc::new(Vec::new()),
+            Model::Loaded { db, .. } => Arc::new(db.get_all_islands()),
         }
     }
 }

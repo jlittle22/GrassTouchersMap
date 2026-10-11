@@ -20,6 +20,23 @@ impl Default for HiddenId {
     }
 }
 
+/// what a selection picks: towns, or the islands they're on
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default, PartialOrd, Ord,
+)]
+pub enum SelectionTarget {
+    #[default]
+    Towns,
+    Islands,
+}
+
+impl SelectionTarget {
+    #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if passes a reference
+    fn is_towns(&self) -> bool {
+        *self == Self::Towns
+    }
+}
+
 #[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Clone, Serialize, Deserialize, Eq)]
 pub struct EmptyTownSelection {
@@ -34,6 +51,10 @@ pub struct EmptyTownSelection {
 
     #[serde(default)]
     pub constraint_join_mode: AndOr,
+
+    /// left out when saving town selections, so files stay the same as before islands
+    #[serde(default, skip_serializing_if = "SelectionTarget::is_towns")]
+    pub target: SelectionTarget,
 
     #[serde(default)]
     pub color: egui::Color32,
@@ -53,6 +74,7 @@ impl Default for EmptyTownSelection {
             hidden_id: HiddenId::default(),
             constraints: vec![EmptyConstraint::default()],
             constraint_join_mode: AndOr::default(),
+            target: SelectionTarget::default(),
             color: egui::Color32::GREEN,
             hidden: false,
         }
@@ -74,6 +96,7 @@ impl PartialEq for EmptyTownSelection {
         self.name == other.name
             && self.constraints == other.constraints
             && self.constraint_join_mode == other.constraint_join_mode
+            && self.target == other.target
     }
 }
 
@@ -82,6 +105,7 @@ impl Hash for EmptyTownSelection {
         self.name.hash(state);
         self.constraints.hash(state);
         self.constraint_join_mode.hash(state);
+        self.target.hash(state);
     }
 }
 
@@ -101,6 +125,11 @@ impl Ord for EmptyTownSelection {
         let cmp_join = self.constraint_join_mode.cmp(&other.constraint_join_mode);
         if cmp_join != std::cmp::Ordering::Equal {
             return cmp_join;
+        }
+
+        let cmp_target = self.target.cmp(&other.target);
+        if cmp_target != std::cmp::Ordering::Equal {
+            return cmp_target;
         }
 
         for (e_self, e_other) in self.constraints.iter().zip(other.constraints.iter()) {
@@ -127,9 +156,11 @@ impl EmptyTownSelection {
             name: self.name.clone(),
             constraints: self.constraints.iter().map(EmptyConstraint::fill).collect(),
             constraint_join_mode: self.constraint_join_mode,
+            target: self.target,
             color: self.color,
             hidden: self.hidden,
             towns: Arc::new(Vec::new()),
+            islands: Arc::new(Vec::new()),
         }
     }
 

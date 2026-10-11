@@ -1,5 +1,6 @@
-use super::database::{Alliance, BackendTown, DataTable, Island, Offset, Player};
+use super::database::{Alliance, BackendIsland, BackendTown, DataTable, Offset, Player};
 use super::{offset_data, APIResponse};
+use crate::island::{IslandShape, Resource};
 use anyhow::Context;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -228,13 +229,15 @@ impl DataTable {
         let (bl_towns, towns) =
             Self::parse_towns(&api_response.towns.unwrap(), &players, &islands, &offsets);
         let towns = towns.into_values().collect();
+        let mut islands: Vec<Rc<BackendIsland>> = islands.into_values().collect();
+        islands.sort_unstable_by_key(|island| island.id);
 
         // TODO: do something with the bad lines information
         let total_bad_lines = bl_alliances + bl_islands + bl_players + bl_towns;
         if total_bad_lines > 0 {
             eprintln!("Got {total_bad_lines} bad lines in api response.");
         }
-        Self { towns }
+        Self::new(towns, islands)
     }
 
     fn make_offsets() -> HashMap<(u8, u8), Rc<Offset>> {
@@ -323,8 +326,8 @@ impl DataTable {
         return (bad_lines, re);
     }
 
-    fn parse_islands(data: &str) -> (u32, HashMap<(u16, u16), Rc<Island>>) {
-        fn parse_line(line: &str) -> anyhow::Result<(u16, u16, Island)> {
+    fn parse_islands(data: &str) -> (u32, HashMap<(u16, u16), Rc<BackendIsland>>) {
+        fn parse_line(line: &str) -> anyhow::Result<(u16, u16, BackendIsland)> {
             let mut values = line.split(',');
 
             let id = values
@@ -347,30 +350,36 @@ impl DataTable {
                 .with_context(|| format!("No island type in {line}"))?
                 .parse()
                 .with_context(|| format!("No island type in {line} that can be parsed as int"))?;
-            let towns = values
+            // Grepolis calls it `available_towns`: free + occupied always adds up to the slots
+            let free_slots = values
                 .next()
-                .with_context(|| format!("No island towns in {line}"))?
+                .with_context(|| format!("No island free slots in {line}"))?
                 .parse()
-                .with_context(|| format!("No island towns in {line} that can be parsed as int"))?;
-            let ressource_plus = values
-                .next()
-                .with_context(|| format!("No island res+ in {line}"))?
-                .to_string();
-            let ressource_minus = values
-                .next()
-                .with_context(|| format!("No island res- in {line}"))?
-                .to_string();
+                .with_context(|| {
+                    format!("No island free slots in {line} that can be parsed as int")
+                })?;
+            let resource_plus = Resource::parse(
+                values
+                    .next()
+                    .with_context(|| format!("No island res+ in {line}"))?,
+            );
+            let resource_minus = Resource::parse(
+                values
+                    .next()
+                    .with_context(|| format!("No island res- in {line}"))?,
+            );
             return Ok((
                 x,
                 y,
-                Island {
+                BackendIsland {
                     id,
                     x,
                     y,
                     typ,
-                    towns,
-                    ressource_plus,
-                    ressource_minus,
+                    slots: IslandShape::slot_count(typ),
+                    free_slots,
+                    resource_plus,
+                    resource_minus,
                 },
             ));
         }
@@ -476,13 +485,13 @@ impl DataTable {
     fn parse_towns(
         data: &str,
         players: &HashMap<u32, Rc<Player>>,
-        islands: &HashMap<(u16, u16), Rc<Island>>,
+        islands: &HashMap<(u16, u16), Rc<BackendIsland>>,
         offsets: &HashMap<(u8, u8), Rc<Offset>>,
     ) -> (u32, HashMap<u32, Rc<BackendTown>>) {
         fn parse_line(
             line: &str,
             players: &HashMap<u32, Rc<Player>>,
-            islands: &HashMap<(u16, u16), Rc<Island>>,
+            islands: &HashMap<(u16, u16), Rc<BackendIsland>>,
             offsets: &HashMap<(u8, u8), Rc<Offset>>,
         ) -> anyhow::Result<(u32, BackendTown)> {
             let mut values = line.split(',');
@@ -545,7 +554,7 @@ impl DataTable {
             };
 
             // get actual island from x and y
-            let island_tuple = (x, y, {
+            let island = {
                 let opt_island = islands.get(&(x, y));
                 if let Some(island) = opt_island {
                     Rc::clone(island)
@@ -554,11 +563,11 @@ impl DataTable {
                     let (_key, value) = islands.iter().next().unwrap();
                     Rc::clone(value)
                 }
-            });
+            };
 
             // get the offset from the offset list from slot_number
             let offset_tuple = (slot_number, {
-                let opt_offset = offsets.get(&(island_tuple.2.typ, slot_number));
+                let opt_offset = offsets.get(&(island.typ, slot_number));
                 if let Some(offset) = opt_offset {
                     Rc::clone(offset)
                 } else {
@@ -579,7 +588,7 @@ impl DataTable {
                     name,
                     points,
                     player: player_tuple,
-                    island: island_tuple,
+                    island,
                     offset: offset_tuple,
                     actual_x,
                     actual_y,

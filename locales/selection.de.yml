@@ -1,5 +1,10 @@
 selection:
   town_count: "%{count} Städte"
+  island_count: "%{count} Inseln"
+  target:
+    towns: "Städte"
+    islands: "Inseln"
+    hint: "Zwischen Städte- und Inselauswahl wechseln. Eine Inselauswahl findet Inseln über ihre eigenen Eigenschaften oder Inseln mit mindestens einer Stadt, die eine Stadteigenschaft erfüllt."
 
   constraint:
     player_id: "SpielerID"
@@ -19,7 +24,7 @@ selection:
     island_x: "InselX"
     island_y: "InselY"
     island_type: "InselTyp"
-    island_towns: "InselStädte"
+    island_towns: "InselFreiePlätze"
     island_resmore: "InselResPlus"
     island_resless: "InselResMinus"
 

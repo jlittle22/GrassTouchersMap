@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::constraint::Constraint;
 use crate::emptyconstraint::EmptyConstraint;
-use crate::emptyselection::{EmptyTownSelection, HiddenId};
+use crate::emptyselection::{EmptyTownSelection, HiddenId, SelectionTarget};
+use crate::island::Island;
 use crate::presenter::Presenter;
 use crate::town::Town;
 use crate::view::{Change, Refresh};
@@ -48,9 +49,13 @@ pub struct TownSelection {
     pub name: String,
     pub constraints: Vec<Constraint>,
     pub constraint_join_mode: AndOr,
+    pub target: SelectionTarget,
     pub color: egui::Color32,
     pub hidden: bool,
+    /// the matching towns, empty for island selections
     pub towns: Arc<Vec<Town>>,
+    /// the matching islands, empty for town selections
+    pub islands: Arc<Vec<Island>>,
 }
 
 // required for serde
@@ -93,10 +98,11 @@ impl fmt::Display for TownSelection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "TownSelection({}, {:?}, {} towns)",
+            "TownSelection({}, {:?}, {} towns, {} islands)",
             self.name,
             self.constraints,
-            self.towns.len()
+            self.towns.len(),
+            self.islands.len()
         )
     }
 }
@@ -120,6 +126,7 @@ impl TownSelection {
                 .map(Constraint::partial_clone)
                 .collect(),
             constraint_join_mode: self.constraint_join_mode,
+            target: self.target,
             color: self.color, // implements copy
             hidden: self.hidden,
         }
@@ -190,9 +197,19 @@ impl TownSelection {
             // anything. If we do can can drop the keep_ddv arguement, which would cascade and remove a lot of code.
         }
 
-        let fetch_towns_result =
-            presenter.towns_for_selection(&self.partial_clone(), all_selections);
-        return fetch_towns_result.map(|towns| self.towns = towns); // map Result<Arc<Vec<Towns>>> to Result<()> implicitly
+        match self.target {
+            SelectionTarget::Towns => {
+                self.towns =
+                    presenter.towns_for_selection(&self.partial_clone(), all_selections)?;
+                self.islands = Arc::new(Vec::new());
+            }
+            SelectionTarget::Islands => {
+                self.islands =
+                    presenter.islands_for_selection(&self.partial_clone(), all_selections)?;
+                self.towns = Arc::new(Vec::new());
+            }
+        }
+        return Ok(());
 
         // }
     }
@@ -259,7 +276,31 @@ impl TownSelection {
 
                 ui.color_edit_button_srgba(&mut self.color);
 
-                ui.label(t!("selection.town_count", count = self.towns.len()));
+                // what the selection picks, towns or the islands they're on
+                let target_text = match self.target {
+                    SelectionTarget::Towns => t!("selection.target.towns"),
+                    SelectionTarget::Islands => t!("selection.target.islands"),
+                };
+                if ui
+                    .button(target_text)
+                    .on_hover_text(t!("selection.target.hint"))
+                    .clicked()
+                {
+                    self.target = match self.target {
+                        SelectionTarget::Towns => SelectionTarget::Islands,
+                        SelectionTarget::Islands => SelectionTarget::Towns,
+                    };
+                    refresh_action = Refresh::Complete;
+                }
+
+                ui.label(match self.target {
+                    SelectionTarget::Towns => {
+                        t!("selection.town_count", count = self.towns.len())
+                    }
+                    SelectionTarget::Islands => {
+                        t!("selection.island_count", count = self.islands.len())
+                    }
+                });
             })
             .body(|ui| {
                 let this_selection = self.partial_clone();

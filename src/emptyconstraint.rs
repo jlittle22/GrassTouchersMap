@@ -1,7 +1,8 @@
 use crate::{
     constraint::{Comparator, Constraint, ConstraintType, ConstraintTypeType},
-    emptyselection::EmptyTownSelection,
-    model::database::{self, BackendTown},
+    emptyselection::{EmptyTownSelection, SelectionTarget},
+    island::Resource,
+    model::database::{self, BackendIsland, BackendTown, DataTable},
     selection::AndOr,
 };
 use std::{collections::HashSet, fmt, hash::Hash, rc::Rc};
@@ -65,10 +66,47 @@ impl EmptyConstraint {
         }
     }
 
+    /// whether this compares an attribute of the island rather than of the town or its owner
+    pub fn is_island_attribute(&self) -> bool {
+        matches!(
+            self.constraint_type,
+            ConstraintType::IslandID
+                | ConstraintType::IslandX
+                | ConstraintType::IslandY
+                | ConstraintType::IslandType
+                | ConstraintType::IslandTowns
+                | ConstraintType::IslandResMore
+                | ConstraintType::IslandResLess
+        )
+    }
+
+    /// whether `island` matches this island attribute constraint, given the value parsed as a
+    /// number. `false` for other constraint types.
+    pub fn island_matches(&self, island: &BackendIsland, value_f64: f64) -> bool {
+        let resource = |resource: Option<Resource>| {
+            let name = resource.map_or("", Resource::name);
+            self.comparator
+                .compare(name, self.value.to_lowercase().as_str())
+        };
+        match self.constraint_type {
+            ConstraintType::IslandID => self.comparator.compare(f64::from(island.id), value_f64),
+            ConstraintType::IslandX => self.comparator.compare(f64::from(island.x), value_f64),
+            ConstraintType::IslandY => self.comparator.compare(f64::from(island.y), value_f64),
+            ConstraintType::IslandType => self.comparator.compare(f64::from(island.typ), value_f64),
+            ConstraintType::IslandTowns => self
+                .comparator
+                .compare(f64::from(island.free_slots), value_f64),
+            ConstraintType::IslandResMore => resource(island.resource_plus),
+            ConstraintType::IslandResLess => resource(island.resource_minus),
+            _ => false,
+        }
+    }
+
     /// given a set of towns, modify said set to only include towns for which the constraint matches.
     #[allow(clippy::too_many_lines)]
     pub fn matching_towns(
         &self,
+        db: &DataTable,
         towns: &mut HashSet<Rc<BackendTown>>,
         all_selections: &[EmptyTownSelection],
         join_mode: AndOr, // NOTE: this could be dropped, since database.rs ensures this method is never called for constraints that do not have a valid input.
@@ -233,63 +271,37 @@ impl EmptyConstraint {
                 ConstraintType::TownPoints => {
                     towns.retain(|t| self.comparator.compare(f64::from(t.points), value_f64));
                 }
-                ConstraintType::IslandID => {
-                    towns.retain(|t| {
-                        let (_x, _y, island) = &t.island;
-                        self.comparator.compare(f64::from(island.id), value_f64)
-                    });
-                }
-                ConstraintType::IslandX => {
-                    towns.retain(|t| {
-                        let (x, _y, _island) = &t.island;
-                        self.comparator.compare(f64::from(*x), value_f64)
-                    });
-                }
-                ConstraintType::IslandY => {
-                    towns.retain(|t| {
-                        let (_x, y, _island) = &t.island;
-                        self.comparator.compare(f64::from(*y), value_f64)
-                    });
-                }
-                ConstraintType::IslandType => {
-                    towns.retain(|t| {
-                        let (_x, _y, island) = &t.island;
-                        self.comparator.compare(f64::from(island.typ), value_f64)
-                    });
-                }
-                ConstraintType::IslandTowns => {
-                    towns.retain(|t| {
-                        let (_x, _y, island) = &t.island;
-                        self.comparator.compare(f64::from(island.towns), value_f64)
-                    });
-                }
-                ConstraintType::IslandResMore => {
-                    towns.retain(|t| {
-                        let (_x, _y, island) = &t.island;
-                        self.comparator.compare(&island.ressource_plus, &self.value)
-                    });
-                }
-                ConstraintType::IslandResLess => {
-                    towns.retain(|t| {
-                        let (_x, _y, island) = &t.island;
-                        self.comparator
-                            .compare(&island.ressource_minus, &self.value)
-                    });
+                ConstraintType::IslandID
+                | ConstraintType::IslandX
+                | ConstraintType::IslandY
+                | ConstraintType::IslandType
+                | ConstraintType::IslandTowns
+                | ConstraintType::IslandResMore
+                | ConstraintType::IslandResLess => {
+                    towns.retain(|t| self.island_matches(&t.island, value_f64));
                 }
             },
-            Comparator::InSelection => {
+            Comparator::InSelection | Comparator::NotInSelection => {
+                let keep = self.comparator == Comparator::InSelection;
                 let opt_selection = all_selections.iter().find(|s| s.name == self.value);
                 let selection = opt_selection.expect("we ran EmptyConstraint::has_valid_input just before this. So unwrap _must_ be fine here!");
-                let towns_in_referenced_selection =
-                    database::matching_towns_for_selection(towns, selection, all_selections);
-                towns.retain(|t| towns_in_referenced_selection.contains(t));
-            }
-            Comparator::NotInSelection => {
-                let opt_selection = all_selections.iter().find(|s| s.name == self.value);
-                let selection = opt_selection.expect("we ran EmptyConstraint::has_valid_input just before this. So unwrap _must_ be fine here!");
-                let towns_in_referenced_selection =
-                    database::matching_towns_for_selection(towns, selection, all_selections);
-                towns.retain(|t| !towns_in_referenced_selection.contains(t));
+                match selection.target {
+                    SelectionTarget::Towns => {
+                        let towns_in_referenced_selection = database::matching_towns_for_selection(
+                            db,
+                            towns,
+                            selection,
+                            all_selections,
+                        );
+                        towns.retain(|t| towns_in_referenced_selection.contains(t) == keep);
+                    }
+                    // towns on (or not on) the islands of an island selection
+                    SelectionTarget::Islands => {
+                        let islands =
+                            database::matching_islands_for_selection(db, selection, all_selections);
+                        towns.retain(|t| islands.contains(&t.island.id) == keep);
+                    }
+                }
             }
         };
     }

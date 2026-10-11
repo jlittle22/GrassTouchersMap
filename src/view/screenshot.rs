@@ -104,6 +104,35 @@ impl Scene {
         self.points(radius + width, at);
     }
 
+    /// convex polygons given by their corners on screen, filled and outlined
+    pub fn polygons(
+        &mut self,
+        fill: egui::Color32,
+        stroke: egui::Stroke,
+        polygons: impl IntoIterator<Item = Vec<egui::Pos2>>,
+    ) {
+        let _ = writeln!(
+            self.text,
+            "polys {} {} {:.1}",
+            hex(fill),
+            hex(stroke.color),
+            stroke.width * self.scale
+        );
+        let inside = egui::Rect::from_min_size(egui::Pos2::ZERO, self.size).expand(stroke.width);
+        for corners in polygons {
+            let corners: Vec<egui::Pos2> = corners.into_iter().map(|p| self.px(p)).collect();
+            if corners.len() < 3 || !inside.intersects(egui::Rect::from_points(&corners)) {
+                continue;
+            }
+            let line: Vec<String> = corners
+                .iter()
+                .map(|p| format!("{:.1} {:.1}", p.x, p.y))
+                .collect();
+            self.text.push_str(&line.join(" "));
+            self.text.push('\n');
+        }
+    }
+
     /// the positions that are at least partly inside the viewport
     fn points(&mut self, radius: f32, at: impl IntoIterator<Item = egui::Pos2>) {
         let margin = radius * self.scale + 1.0;
@@ -165,9 +194,23 @@ impl Scene {
     }
 }
 
+/// `RRGGBBAA`, un-premultiplied in sRGB like egui blends. `Color32::to_srgba_unmultiplied`
+/// goes through linear space, which darkens translucent colors.
 fn hex(color: egui::Color32) -> String {
-    let [r, g, b, a] = color.to_srgba_unmultiplied();
-    format!("{r:02x}{g:02x}{b:02x}{a:02x}")
+    let [r, g, b, a] = color.to_array();
+    let unmultiply = |c: u8| {
+        if a == 0 {
+            0
+        } else {
+            u8::try_from((u32::from(c) * 255 + u32::from(a) / 2) / u32::from(a)).unwrap_or(255)
+        }
+    };
+    format!(
+        "{:02x}{:02x}{:02x}{a:02x}",
+        unmultiply(r),
+        unmultiply(g),
+        unmultiply(b)
+    )
 }
 
 #[cfg(test)]
@@ -196,6 +239,15 @@ mod tests {
         let towns = [egui::pos2(110.0, 60.0), egui::pos2(5000.0, 60.0)];
         scene.dots(egui::Color32::from_gray(180), 1.5, towns);
         scene.rings(egui::Color32::from_rgb(143, 199, 62), 3.5, 2.0, towns);
+        // one square in view, one far outside it that gets left out
+        let square = [(110.0, 60.0), (120.0, 60.0), (120.0, 70.0), (110.0, 70.0)];
+        let far = [(5000.0, 60.0), (5010.0, 60.0), (5010.0, 70.0)];
+        scene.polygons(
+            egui::Color32::from_rgb(88, 112, 128).gamma_multiply(0.2),
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(88, 112, 128)),
+            [&square[..], &far[..]]
+                .map(|corners| corners.iter().map(|&(x, y)| egui::pos2(x, y)).collect()),
+        );
         scene.logo(egui::Rect::from_min_size(
             egui::pos2(108.0, 58.0),
             egui::vec2(48.0, 48.0),
@@ -207,6 +259,7 @@ mod tests {
              line 400.0 -100.0 400.0 1700.0 2.0 606060ff 14.0 14.0\n\
              dots b4b4b4ff 3.0\n20.0 20.0\n\
              rings 8fc73eff 7.0 4.0\n20.0 20.0\n\
+             polys 5a6e8233 587080ff 2.0\n20.0 20.0 40.0 20.0 40.0 40.0 20.0 40.0\n\
              logo 17.3 16.0 93.3 96.0\n"
         );
     }

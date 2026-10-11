@@ -2,7 +2,8 @@
 ///
 /// Layout, then base64url without padding:
 /// - header byte: format version in the low 7 bits, top bit set when the body is deflated
-/// - body: selection count, then per selection: name, flags (bit 0 = Or, bit 1 = hidden),
+/// - body: selection count, then per selection: name, flags (bit 0 = Or, bit 1 = hidden,
+///   bit 2 = selects islands),
 ///   RGBA (premultiplied, as `Color32` stores it), constraint count, then per constraint:
 ///   one byte `type_code * 8 + comparator_code` followed by the value.
 ///
@@ -13,7 +14,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 
 use crate::constraint::{Comparator, ConstraintType};
 use crate::emptyconstraint::EmptyConstraint;
-use crate::emptyselection::{EmptyTownSelection, HiddenId};
+use crate::emptyselection::{EmptyTownSelection, HiddenId, SelectionTarget};
 use crate::selection::AndOr;
 
 const VERSION: u8 = 1;
@@ -24,6 +25,7 @@ const MAX_INFLATED_LEN: usize = 1 << 20;
 
 const FLAG_OR: u8 = 1;
 const FLAG_HIDDEN: u8 = 2;
+const FLAG_ISLANDS: u8 = 4;
 
 fn type_code(constraint_type: ConstraintType) -> u8 {
     match constraint_type {
@@ -143,6 +145,9 @@ fn encode_body(selections: &[EmptyTownSelection]) -> Vec<u8> {
         if selection.hidden {
             flags |= FLAG_HIDDEN;
         }
+        if selection.target == SelectionTarget::Islands {
+            flags |= FLAG_ISLANDS;
+        }
         out.push(flags);
         out.extend_from_slice(&selection.color.to_array());
         write_varint(&mut out, selection.constraints.len());
@@ -161,7 +166,7 @@ fn decode_body(bytes: &[u8]) -> Option<Vec<EmptyTownSelection>> {
     for _ in 0..count {
         let name = reader.string()?;
         let flags = reader.byte()?;
-        if flags & !(FLAG_OR | FLAG_HIDDEN) != 0 {
+        if flags & !(FLAG_OR | FLAG_HIDDEN | FLAG_ISLANDS) != 0 {
             return None;
         }
         let [r, g, b, a] = [reader.byte()?, reader.byte()?, reader.byte()?, reader.byte()?];
@@ -180,6 +185,11 @@ fn decode_body(bytes: &[u8]) -> Option<Vec<EmptyTownSelection>> {
             hidden_id: HiddenId::default(),
             constraints,
             constraint_join_mode: if flags & FLAG_OR == 0 { AndOr::And } else { AndOr::Or },
+            target: if flags & FLAG_ISLANDS == 0 {
+                SelectionTarget::Towns
+            } else {
+                SelectionTarget::Islands
+            },
             color: egui::Color32::from_rgba_premultiplied(r, g, b, a),
             hidden: flags & FLAG_HIDDEN != 0,
         });
@@ -259,6 +269,7 @@ mod tests {
                 })
                 .collect(),
             constraint_join_mode: join,
+            target: SelectionTarget::Towns,
             color,
             hidden: false,
         }
@@ -309,6 +320,17 @@ mod tests {
             AndOr::Or,
             egui::Color32::BLUE,
         ));
+        let mut free = selection(
+            "Free slots",
+            &[
+                (ConstraintType::IslandTowns, Comparator::GreaterThan, "3"),
+                (ConstraintType::AllianceName, Comparator::InSelection, "The Titans"),
+            ],
+            AndOr::And,
+            egui::Color32::YELLOW,
+        );
+        free.target = SelectionTarget::Islands;
+        selections.push(free);
         selections
     }
 

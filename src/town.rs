@@ -9,4 +9,5 @@ pub struct Town {
     pub y: f32,
     pub slot_number: u8,
     pub points: u16,
+    pub island_id: u32,
 }

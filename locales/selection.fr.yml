@@ -1,5 +1,10 @@
 selection:
   town_count: "%{count} Villes"
+  island_count: "%{count} Îles"
+  target:
+    towns: "Villes"
+    islands: "Îles"
+    hint: "Basculer entre la sélection de villes et d'îles. Une sélection d'îles trouve les îles par leurs propres attributs, ou les îles avec au moins une ville correspondant à un attribut de ville."
 
   player_id: "ID du joueur"
   player_name: "Nom du joueur"
@@ -22,7 +27,7 @@ selection:
     island_x: "X de l'île"
     island_y: "Y de l'île"
     island_type: "Type de l'île"
-    island_towns: "Villes de l'île"
+    island_towns: "Emplacements libres de l'île"
     island_resmore: "Ressources supplémentaires de l'île"
     island_resless: "Ressources réduites de l'île"
 

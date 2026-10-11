@@ -2,6 +2,7 @@ use std::fmt::Write as _;
 
 use egui::Shape;
 
+use crate::island::Island;
 use crate::town::Town;
 
 use super::{
@@ -13,6 +14,32 @@ use super::{
 /// brand's lightish green (sampled from assets/grass_touchers_logo.png), used to
 /// highlight the ctrl+drag rectangle selection and the towns it picks out.
 const SELECTION_GREEN: egui::Color32 = egui::Color32::from_rgb(143, 199, 62);
+
+/// zoom (screen pixels per world unit) from which islands are drawn as outlines, and island
+/// selections as filled outlines instead of dots
+const ISLAND_OUTLINE_ZOOM: f32 = 4.0;
+/// zoom from which the free town slots on islands are drawn
+const FREE_SLOT_ZOOM: f32 = 12.0;
+/// island selections drawn as dots when zoomed out
+const ISLAND_DOT_RADIUS: f32 = 2.5;
+
+/// an island's outline on screen
+fn island_outline(canvas: &CanvasData, island: &Island) -> Vec<egui::Pos2> {
+    island
+        .outline()
+        .map(|p| canvas.world_to_screen(p.to_vec2()).to_pos2())
+        .collect()
+}
+
+/// fill and stroke of an island drawn as an outline: the layer gets a faint fill, island
+/// selections a stronger one
+fn island_paint(color: egui::Color32, selected: bool) -> (egui::Color32, egui::Stroke) {
+    if selected {
+        (color.gamma_multiply(0.35), egui::Stroke::new(1.5, color))
+    } else {
+        (color.gamma_multiply(0.2), egui::Stroke::new(1.0, color))
+    }
+}
 
 /// where the logo overlay goes, fixed to the map's top left corner regardless of pan/zoom
 fn logo_rect(map: egui::Rect) -> egui::Rect {
@@ -141,6 +168,13 @@ impl View {
                     .iter()
                     .filter(|town| filter.town_in_viewport(town))
                     .collect();
+                let visible_islands: Vec<&Island> = self
+                    .ui_data
+                    .all_islands
+                    .iter()
+                    .filter(|island| filter.island_in_viewport(island))
+                    .collect();
+                let island_outlines = canvas_data.zoom >= ISLAND_OUTLINE_ZOOM;
                 let visible_ghost_towns: Vec<&Town> = self
                     .ui_data
                     .ghost_towns
@@ -288,6 +322,57 @@ impl View {
                             7.0,
                             7.0,
                         ));
+                    }
+                }
+
+                // DRAW ISLANDS under the towns: outlines once they're big enough to tell apart,
+                // and the free town slots as hollow circles closer still
+                if self.ui_data.settings_islands.enabled && island_outlines {
+                    let (fill, stroke) = island_paint(self.ui_data.settings_islands.color, false);
+                    for island in &visible_islands {
+                        painter.add(egui::Shape::convex_polygon(
+                            island_outline(canvas_data, island),
+                            fill,
+                            stroke,
+                        ));
+                    }
+                    if canvas_data.zoom >= FREE_SLOT_ZOOM {
+                        for slot in visible_islands.iter().flat_map(|i| i.free_slot_positions()) {
+                            painter.circle_stroke(
+                                canvas_data.world_to_screen(slot.to_vec2()).to_pos2(),
+                                1.0 + canvas_data.scale_world_to_screen(0.15),
+                                egui::Stroke::new(1.0, self.ui_data.settings_islands.color),
+                            );
+                        }
+                    }
+                }
+
+                // DRAW ISLAND SELECTIONS, also under the towns so the towns stay readable
+                for selection in &self.ui_data.selections {
+                    if selection.is_hidden() {
+                        continue;
+                    }
+                    let (fill, stroke) = island_paint(selection.color, true);
+                    for island in selection
+                        .islands
+                        .iter()
+                        .filter(|island| filter.island_in_viewport(island))
+                    {
+                        if island_outlines {
+                            painter.add(egui::Shape::convex_polygon(
+                                island_outline(canvas_data, island),
+                                fill,
+                                stroke,
+                            ));
+                        } else {
+                            painter.circle_filled(
+                                canvas_data
+                                    .world_to_screen(island.center().to_vec2())
+                                    .to_pos2(),
+                                ISLAND_DOT_RADIUS,
+                                selection.color,
+                            );
+                        }
                     }
                 }
 
@@ -448,6 +533,57 @@ impl View {
                                 }
                             }
                         }
+                        if self.ui_data.settings_islands.enabled && island_outlines {
+                            let (fill, stroke) =
+                                island_paint(self.ui_data.settings_islands.color, false);
+                            scene.polygons(
+                                fill,
+                                stroke,
+                                visible_islands
+                                    .iter()
+                                    .map(|island| island_outline(canvas_data, island)),
+                            );
+                            if canvas_data.zoom >= FREE_SLOT_ZOOM {
+                                scene.rings(
+                                    self.ui_data.settings_islands.color,
+                                    1.0 + town_radius,
+                                    1.0,
+                                    visible_islands
+                                        .iter()
+                                        .flat_map(|i| i.free_slot_positions())
+                                        .map(|slot| {
+                                            canvas_data.world_to_screen(slot.to_vec2()).to_pos2()
+                                        }),
+                                );
+                            }
+                        }
+                        for selection in &self.ui_data.selections {
+                            if selection.is_hidden() || selection.islands.is_empty() {
+                                continue;
+                            }
+                            let islands = selection
+                                .islands
+                                .iter()
+                                .filter(|island| filter.island_in_viewport(island));
+                            if island_outlines {
+                                let (fill, stroke) = island_paint(selection.color, true);
+                                scene.polygons(
+                                    fill,
+                                    stroke,
+                                    islands.map(|island| island_outline(canvas_data, island)),
+                                );
+                            } else {
+                                scene.dots(
+                                    selection.color,
+                                    ISLAND_DOT_RADIUS,
+                                    islands.map(|island| {
+                                        canvas_data
+                                            .world_to_screen(island.center().to_vec2())
+                                            .to_pos2()
+                                    }),
+                                );
+                            }
+                        }
                         if self.ui_data.settings_all.enabled {
                             scene.dots(
                                 self.ui_data.settings_all.color,
@@ -533,30 +669,52 @@ impl View {
                         };
                         ui.label(format!("{position:?}"));
 
-                        if visible_towns_all.is_empty() {
-                            return;
-                        }
-                        let mut closest_town = visible_towns_all[0];
-                        let mut closest_distance =
-                            position.distance(egui::pos2(closest_town.x, closest_town.y));
-                        for town in &visible_towns_all {
-                            let distance = position.distance(egui::pos2(town.x, town.y));
-                            if distance < closest_distance {
-                                closest_distance = distance;
-                                closest_town = town;
-                            }
-                        }
+                        let closest_town = visible_towns_all
+                            .iter()
+                            .map(|town| (town, position.distance(egui::pos2(town.x, town.y))))
+                            .min_by(|a, b| a.1.total_cmp(&b.1))
+                            .filter(|&(_, distance)| distance < 1.5)
+                            .map(|(town, _)| *town);
 
-                        if closest_distance >= 1.5 {
-                            return;
+                        if let Some(town) = closest_town {
+                            let mut text = t!(
+                                "map.hover",
+                                name = town.name,
+                                points = town.points,
+                                player = town.player_name.as_deref().unwrap_or(""),
+                                alliance = town.alliance_name.as_deref().unwrap_or(""),
+                            );
+                            let all_islands = &self.ui_data.all_islands;
+                            if let Some(island) =
+                                all_islands.iter().find(|i| i.id == town.island_id)
+                            {
+                                text.push('\n');
+                                text.push_str(&t!(
+                                    "map.hover_island",
+                                    id = island.id,
+                                    free = island.free_slots,
+                                    slots = island.slots,
+                                ));
+                            }
+                            ui.label(text);
+                        } else if let Some(island) = visible_islands
+                            .iter()
+                            .find(|island| island.contains(position))
+                        {
+                            let resource = |r: Option<crate::island::Resource>| {
+                                r.map_or("?", crate::island::Resource::name)
+                            };
+                            ui.label(t!(
+                                "map.island_hover",
+                                id = island.id,
+                                ocean = island.ocean(),
+                                typ = island.typ,
+                                free = island.free_slots,
+                                slots = island.slots,
+                                plus = resource(island.resource_plus),
+                                minus = resource(island.resource_minus),
+                            ));
                         }
-                        ui.label(t!(
-                            "map.hover",
-                            name = closest_town.name,
-                            points = closest_town.points,
-                            player = closest_town.player_name.as_deref().unwrap_or(""),
-                            alliance = closest_town.alliance_name.as_deref().unwrap_or(""),
-                        ));
                     });
                 }
 

@@ -492,6 +492,7 @@ impl eframe::App for View {
                 self.ui_state = State::Show;
                 self.ui_data.ghost_towns = self.presenter.get_ghost_towns();
                 self.ui_data.all_towns = self.presenter.get_all_towns();
+                self.ui_data.all_islands = self.presenter.get_all_islands();
 
                 // ensure the towns in the selection are fetched anew after loading the data from the server.
                 // If we don't do this the selection may become stale and show towns from server ab12 on a
@@ -504,6 +505,7 @@ impl eframe::App for View {
                     .collect();
                 for selection in &mut self.ui_data.selections {
                     selection.towns = Arc::new(Vec::new());
+                    selection.islands = Arc::new(Vec::new());
                     let result = selection.refresh_self(
                         &mut self.presenter,
                         &HashSet::new(),
