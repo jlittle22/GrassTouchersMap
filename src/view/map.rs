@@ -25,23 +25,40 @@ fn copy_text(ctx: &egui::Context, text: String) {
 }
 
 /// One `[quote]` table of every selected town, in DIO-Tools' town list layout with an
-/// added player column, signed with our own link:
+/// added player column, under a minimap of them rendered by the reflector, signed with our
+/// own link:
 ///
 /// ```text
 /// [quote][size=9]2 Cities[/size]
+/// [img]https://reflector.grasstouchers.gg/us145/minimap/3135-3503.png[/img]
 /// [table]
 /// [*]1.[|][town]3135[/town][|][player]Frayte[/player][|]14937 points[|]Ocean 44[/*]
 /// [*]2.[|][town]3503[/town][|][player]Frayte[/player][|]12965 points[|]Ocean 44[/*]
-/// [/table][url=https://map.grasstouchers.gg]Grass Touchers Map[/url] - v.2.0.2[/quote]
+/// [/table][url=https://map.grasstouchers.gg]Grass Touchers Map[/url][/quote]
 /// ```
 ///
 /// Towns are sorted by id. Ghost towns get an empty player cell.
-fn town_bbcode(towns: &[&Town]) -> String {
+fn town_bbcode(server_id: &str, towns: &[&Town]) -> String {
+    /// the reflector's limit for one minimap
+    const MAX_MINIMAP_TOWNS: usize = 2000;
+
     let mut towns = towns.to_vec();
     towns.sort_unstable_by_key(|town| town.id);
 
     let cities = if towns.len() == 1 { "City" } else { "Cities" };
-    let mut bbcode = format!("[quote][size=9]{} {cities}[/size]\n[table]\n", towns.len());
+    let mut bbcode = format!("[quote][size=9]{} {cities}[/size]\n", towns.len());
+    if !towns.is_empty() && towns.len() <= MAX_MINIMAP_TOWNS {
+        let ids = towns
+            .iter()
+            .map(|town| town.id.to_string())
+            .collect::<Vec<_>>()
+            .join("-");
+        let _ = writeln!(
+            bbcode,
+            "[img]https://reflector.grasstouchers.gg/{server_id}/minimap/{ids}.png[/img]"
+        );
+    }
+    bbcode.push_str("[table]\n");
     for (i, town) in towns.iter().enumerate() {
         let player = town
             .player_name
@@ -60,11 +77,7 @@ fn town_bbcode(towns: &[&Town]) -> String {
             town.points
         );
     }
-    let _ = write!(
-        bbcode,
-        "[/table][url=https://map.grasstouchers.gg]Grass Touchers Map[/url] - v.{}[/quote]",
-        env!("CARGO_PKG_VERSION")
-    );
+    bbcode.push_str("[/table][url=https://map.grasstouchers.gg]Grass Touchers Map[/url][/quote]");
     bbcode
 }
 
@@ -390,7 +403,7 @@ impl View {
                             .iter()
                             .filter(|town| self.selected_town_ids.contains(&town.id))
                             .collect();
-                        let bbcode = town_bbcode(&towns);
+                        let bbcode = town_bbcode(&self.ui_data.server_id, &towns);
                         copy_text(ctx, bbcode);
                         ui.close_menu();
                     }
