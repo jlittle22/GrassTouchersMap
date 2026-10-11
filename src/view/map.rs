@@ -1,14 +1,19 @@
+use std::collections::HashSet;
 use std::fmt::Write as _;
 
 use egui::Shape;
 
+use crate::constraint::{Comparator, ConstraintType};
+use crate::emptyconstraint::EmptyConstraint;
+use crate::emptyselection::{EmptyTownSelection, SelectionTarget};
 use crate::island::Island;
+use crate::selection::{AndOr, TownSelection};
 use crate::town::Town;
 
 use super::{
     data::{CanvasData, ViewPortFilter},
     screenshot::Scene,
-    View,
+    Progress, State, View,
 };
 
 /// brand's lightish green (sampled from assets/grass_touchers_logo.png), used to
@@ -39,6 +44,55 @@ fn island_paint(color: egui::Color32, selected: bool) -> (egui::Color32, egui::S
     } else {
         (color.gamma_multiply(0.2), egui::Stroke::new(1.0, color))
     }
+}
+
+/// The island under `click` on screen: inside its outline when outlines are drawn, otherwise
+/// near its dot.
+fn island_at<'a>(
+    canvas: &CanvasData,
+    islands: &[&'a Island],
+    outlines: bool,
+    click: egui::Pos2,
+) -> Option<&'a Island> {
+    if outlines {
+        let world = canvas.screen_to_world(click.to_vec2()).to_pos2();
+        islands
+            .iter()
+            .copied()
+            .find(|island| island.contains(world))
+    } else {
+        let screen = |island: &Island| {
+            canvas
+                .world_to_screen(island.center().to_vec2())
+                .to_pos2()
+                .distance(click)
+        };
+        islands
+            .iter()
+            .copied()
+            .map(|island| (island, screen(island)))
+            .filter(|&(_, distance)| distance <= ISLAND_DOT_RADIUS + 4.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(island, _)| island)
+    }
+}
+
+/// the next of a few distinct colors that no selection uses yet, for new selections
+fn unused_color(selections: &[TownSelection]) -> egui::Color32 {
+    const PALETTE: [egui::Color32; 8] = [
+        egui::Color32::from_rgb(255, 140, 0),
+        egui::Color32::from_rgb(0, 200, 255),
+        egui::Color32::from_rgb(255, 64, 160),
+        egui::Color32::from_rgb(255, 220, 0),
+        egui::Color32::from_rgb(160, 100, 255),
+        egui::Color32::from_rgb(255, 64, 64),
+        egui::Color32::from_rgb(0, 220, 140),
+        egui::Color32::from_rgb(255, 255, 255),
+    ];
+    PALETTE
+        .into_iter()
+        .find(|color| selections.iter().all(|s| s.color != *color))
+        .unwrap_or(PALETTE[selections.len() % PALETTE.len()])
 }
 
 /// where the logo overlay goes, fixed to the map's top left corner regardless of pan/zoom
@@ -103,6 +157,8 @@ fn town_bbcode(towns: &[&Town]) -> String {
 impl View {
     #[allow(clippy::too_many_lines)] // UI Code, am I right, hahah
     pub fn ui_map(&mut self, ctx: &egui::Context) {
+        // set by the context menu, done once the map no longer borrows the selections
+        let mut add_island_selection = false;
         egui::CentralPanel::default().show(ctx, |ui| {
             // the canvas frame's fill, for screenshots
             let background = ui.visuals().extreme_bg_color;
@@ -249,7 +305,9 @@ impl View {
                     if ctrl_held {
                         // ctrl+click (no drag) toggles just the nearest rendered town under the
                         // cursor in/out of the selection, leaving the rest of it untouched.
+                        // Off the towns it toggles the island under the cursor instead.
                         if let Some(click_pos) = response.interact_pointer_pos() {
+                            let mut town_hit = false;
                             let closest = rendered_towns.iter().min_by(|a, b| {
                                 let da = canvas_data
                                     .world_to_screen(egui::vec2(a.x, a.y))
@@ -270,20 +328,35 @@ impl View {
                                 // clickable area always covers the visible dot instead of a
                                 // fixed pixel radius that falls inside it once zoomed in.
                                 let hit_radius_px = 4.0 + canvas_data.scale_world_to_screen(0.15);
-                                if screen_pos.distance(click_pos) <= hit_radius_px
-                                    && !self.selected_town_ids.remove(&town.id)
-                                {
-                                    self.selected_town_ids.insert(town.id);
+                                if screen_pos.distance(click_pos) <= hit_radius_px {
+                                    town_hit = true;
+                                    if !self.selected_town_ids.remove(&town.id) {
+                                        self.selected_town_ids.insert(town.id);
+                                    }
+                                }
+                            }
+                            if !town_hit {
+                                if let Some(island) = island_at(
+                                    canvas_data,
+                                    &visible_islands,
+                                    island_outlines,
+                                    click_pos,
+                                ) {
+                                    if !self.selected_island_ids.remove(&island.id) {
+                                        self.selected_island_ids.insert(island.id);
+                                    }
                                 }
                             }
                         }
                     } else {
                         // a plain click (no ctrl) clears the whole selection
                         self.selected_town_ids.clear();
+                        self.selected_island_ids.clear();
                     }
                 }
                 if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
                     self.selected_town_ids.clear();
+                    self.selected_island_ids.clear();
                 }
 
                 // DRAW GRID
@@ -376,6 +449,30 @@ impl View {
                     }
                 }
 
+                // DRAW CTRL+CLICKED ISLANDS on top of the island selections
+                let picked_islands: Vec<&Island> = visible_islands
+                    .iter()
+                    .copied()
+                    .filter(|island| self.selected_island_ids.contains(&island.id))
+                    .collect();
+                for island in &picked_islands {
+                    if island_outlines {
+                        painter.add(egui::Shape::convex_polygon(
+                            island_outline(canvas_data, island),
+                            SELECTION_GREEN.gamma_multiply(0.25),
+                            egui::Stroke::new(2.5, SELECTION_GREEN),
+                        ));
+                    } else {
+                        painter.circle_stroke(
+                            canvas_data
+                                .world_to_screen(island.center().to_vec2())
+                                .to_pos2(),
+                            ISLAND_DOT_RADIUS + 1.5,
+                            egui::Stroke::new(2.0, SELECTION_GREEN),
+                        );
+                    }
+                }
+
                 // DRAW ALL TOWNS
                 // towns have a diameter of .25 units, approximately
                 if self.ui_data.settings_all.enabled {
@@ -453,6 +550,18 @@ impl View {
 
                 // RIGHT CLICK MENU FOR ACTIONS ON THE (MARQUEE) SELECTION
                 response.context_menu(|ui| {
+                    if !self.selected_island_ids.is_empty()
+                        && ui
+                            .button(t!(
+                                "map.context_menu.add_island_selection",
+                                count = self.selected_island_ids.len()
+                            ))
+                            .clicked()
+                    {
+                        add_island_selection = true;
+                        ui.close_menu();
+                    }
+
                     if ui
                         .button(t!("map.context_menu.copy_mailing_list"))
                         .clicked()
@@ -583,6 +692,26 @@ impl View {
                                     }),
                                 );
                             }
+                        }
+                        if !picked_islands.is_empty() && island_outlines {
+                            scene.polygons(
+                                SELECTION_GREEN.gamma_multiply(0.25),
+                                egui::Stroke::new(2.5, SELECTION_GREEN),
+                                picked_islands
+                                    .iter()
+                                    .map(|island| island_outline(canvas_data, island)),
+                            );
+                        } else if !picked_islands.is_empty() {
+                            scene.rings(
+                                SELECTION_GREEN,
+                                ISLAND_DOT_RADIUS + 1.5,
+                                2.0,
+                                picked_islands.iter().map(|island| {
+                                    canvas_data
+                                        .world_to_screen(island.center().to_vec2())
+                                        .to_pos2()
+                                }),
+                            );
                         }
                         if self.ui_data.settings_all.enabled {
                             scene.dots(
@@ -730,5 +859,58 @@ impl View {
                 response
             })
         });
+        if add_island_selection {
+            self.add_island_selection();
+        }
+    }
+
+    /// Turn the ctrl+clicked islands into a new island selection, one `IslandID = id` per
+    /// island joined with `or`, in a color no other selection uses so it stands out. Its
+    /// color can then be changed in the side panel like any other selection's.
+    fn add_island_selection(&mut self) {
+        let mut ids: Vec<u32> = self.selected_island_ids.drain().collect();
+        ids.sort_unstable();
+        let base = t!("map.picked_islands");
+        // with n selections one of the first n + 1 names is always free
+        let name = (1..=self.ui_data.selections.len() + 1)
+            .map(|n| {
+                if n == 1 {
+                    base.clone()
+                } else {
+                    format!("{base} {n}")
+                }
+            })
+            .find(|name| self.ui_data.selections.iter().all(|s| &s.name != name))
+            .unwrap_or(base);
+        let mut selection = EmptyTownSelection {
+            name,
+            constraints: ids
+                .iter()
+                .map(|id| EmptyConstraint {
+                    constraint_type: ConstraintType::IslandID,
+                    comparator: Comparator::Equal,
+                    value: id.to_string(),
+                })
+                .collect(),
+            constraint_join_mode: AndOr::Or,
+            target: SelectionTarget::Islands,
+            color: unused_color(&self.ui_data.selections),
+            ..EmptyTownSelection::default()
+        }
+        .fill();
+
+        let mut all_selections: Vec<EmptyTownSelection> = self
+            .ui_data
+            .selections
+            .iter()
+            .map(TownSelection::partial_clone)
+            .collect();
+        all_selections.push(selection.partial_clone());
+        if let Err(err) =
+            selection.refresh_self(&mut self.presenter, &HashSet::new(), &all_selections)
+        {
+            self.ui_state = State::Uninitialized(Progress::BackendCrashed(format!("{err:?}")));
+        }
+        self.ui_data.selections.push(selection);
     }
 }

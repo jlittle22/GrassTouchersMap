@@ -2,7 +2,9 @@ map:
   hover: "%{name}\nPoints: %{points}\nJoueur: %{player}\nAlliance: %{alliance}"
   island_hover: "Île %{id} · Mer %{ocean}\nType %{typ} · %{free}/%{slots} emplacements libres\n+%{plus} −%{minus}"
   hover_island: "Île %{id} · %{free}/%{slots} emplacements libres"
+  picked_islands: "Îles choisies"
   context_menu:
+    add_island_selection: "Îles comme sélection (%{count})"
     copy_mailing_list: "Copier la liste de diffusion"
     copy_town_bbcode: "Copier le BBCode des villes"
     copy_stats: "Copier les statistiques de la sélection"

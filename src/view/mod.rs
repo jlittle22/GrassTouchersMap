@@ -75,6 +75,8 @@ pub struct View {
     /// ids of the towns selected via the ctrl+drag rectangle selection. Used as the
     /// target of the map's right-click context menu.
     selected_town_ids: HashSet<u32>,
+    /// ids of the islands toggled via ctrl+click, until they're turned into a selection
+    selected_island_ids: HashSet<u32>,
 }
 
 impl View {
@@ -86,6 +88,7 @@ impl View {
             ui_data: Data::default(),
             marquee_drag_start: None,
             selected_town_ids: HashSet::new(),
+            selected_island_ids: HashSet::new(),
         };
 
         // include a Unicode font and make it the default
