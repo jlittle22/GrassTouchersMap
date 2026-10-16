@@ -27,4 +27,5 @@ sidepanel:
   town_toggle:
     all: "All Towns:"
     ghosts: "Ghost Towns:"
-    islands: "Islands:"
+    resource_islands: "Resource Islands:"
+    rocks: "Rocks:"

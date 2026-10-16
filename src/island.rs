@@ -8,6 +8,8 @@ use crate::model::offset_data::OFFSET_DATA;
 const OFFSET_SCALE: f32 = 125.0;
 /// how far an island's outline reaches past its outermost town slots, in world units
 const OUTLINE_MARGIN: f32 = 0.45;
+/// town slots on every resource island, rocks have fewer
+const RESOURCE_ISLAND_SLOTS: u8 = 20;
 
 /// an island's more or less plentiful resource
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -44,7 +46,7 @@ impl fmt::Display for Resource {
 }
 
 /// An island as the view uses it. Only islands with town slots make it to the view, the
-/// uninhabitable rocks don't.
+/// uninhabitable types 17-36 don't.
 #[derive(Debug, Clone)]
 pub struct Island {
     pub id: u32,
@@ -101,6 +103,12 @@ impl Island {
                 let (a, b) = (outline[i], outline[(i + 1) % outline.len()]);
                 (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x) >= 0.0
             })
+    }
+
+    /// whether this is a full sized island with resources and 20 town slots, as opposed to a
+    /// rock with fewer slots
+    pub fn is_resource_island(&self) -> bool {
+        self.slots >= RESOURCE_ISLAND_SLOTS
     }
 
     /// Grepolis' ocean number, e.g. 45 for x 400..500, y 500..600
@@ -221,7 +229,7 @@ mod tests {
 
     #[test]
     fn every_inhabitable_type_has_a_shape() {
-        // types 1-16 and 37-60 have town slots, 17-36 are rocks
+        // types 1-16 and 37-60 have town slots, 17-36 have none
         for typ in (1..=16).chain(37..=60) {
             let shape = IslandShape::of(typ).unwrap_or_else(|| panic!("type {typ}"));
             assert!(shape.outline.len() >= 3, "type {typ}");
@@ -266,5 +274,16 @@ mod tests {
         assert!(!island.contains(island.center() + egui::vec2(10.0, 0.0)));
         assert_eq!(island.ocean(), 44);
         assert_eq!(island.resource_plus, Some(Resource::Iron));
+        assert!(island.is_resource_island());
+    }
+
+    #[test]
+    fn resource_islands_have_20_slots_and_rocks_fewer() {
+        for typ in (1..=16).chain(37..=60) {
+            let slots = IslandShape::slot_count(typ);
+            let resource_island = (1..=10).contains(&typ) || (37..=46).contains(&typ);
+            assert_eq!(slots == 20, resource_island, "type {typ}");
+            assert!(slots <= 20, "type {typ}");
+        }
     }
 }

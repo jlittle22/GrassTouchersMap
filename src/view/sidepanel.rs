@@ -45,9 +45,17 @@ impl View {
                     ui.color_edit_button_srgba(&mut self.ui_data.settings_ghosts.color);
                 });
                 ui.horizontal(|ui| {
-                    super::eye_toggle::eye_toggle(ui, &mut self.ui_data.settings_islands.enabled);
-                    ui.label(t!("sidepanel.town_toggle.islands"));
-                    ui.color_edit_button_srgba(&mut self.ui_data.settings_islands.color);
+                    super::eye_toggle::eye_toggle(
+                        ui,
+                        &mut self.ui_data.settings_resource_islands.enabled,
+                    );
+                    ui.label(t!("sidepanel.town_toggle.resource_islands"));
+                    ui.color_edit_button_srgba(&mut self.ui_data.settings_resource_islands.color);
+                });
+                ui.horizontal(|ui| {
+                    super::eye_toggle::eye_toggle(ui, &mut self.ui_data.settings_rocks.enabled);
+                    ui.label(t!("sidepanel.town_toggle.rocks"));
+                    ui.color_edit_button_srgba(&mut self.ui_data.settings_rocks.color);
                 });
                 ui.separator();
 

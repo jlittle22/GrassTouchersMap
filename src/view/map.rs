@@ -176,6 +176,18 @@ impl View {
                 // reset it. The .unwrap here is fine, because if it is none we make it
                 // Some() just a line above this comment.
                 let canvas_data = self.ui_data.canvas.as_mut().unwrap();
+                // the toggle and color of the group an island belongs to, resource islands or rocks
+                let (settings_resource_islands, settings_rocks) = (
+                    &self.ui_data.settings_resource_islands,
+                    &self.ui_data.settings_rocks,
+                );
+                let island_settings = |island: &Island| {
+                    if island.is_resource_island() {
+                        settings_resource_islands
+                    } else {
+                        settings_rocks
+                    }
+                };
 
                 let ctrl_held = ctx.input(|input| input.modifiers.ctrl);
 
@@ -228,8 +240,19 @@ impl View {
                     .ui_data
                     .all_islands
                     .iter()
-                    .filter(|island| filter.island_in_viewport(island))
+                    .filter(|island| {
+                        filter.island_in_viewport(island) && island_settings(island).enabled
+                    })
                     .collect();
+                // hiding a group drops its picked islands, so they can't end up in a selection
+                // unseen
+                if !self.selected_island_ids.is_empty() {
+                    for island in self.ui_data.all_islands.iter() {
+                        if !island_settings(island).enabled {
+                            self.selected_island_ids.remove(&island.id);
+                        }
+                    }
+                }
                 let island_outlines = canvas_data.zoom >= ISLAND_OUTLINE_ZOOM;
                 let visible_ghost_towns: Vec<&Town> = self
                     .ui_data
@@ -400,9 +423,9 @@ impl View {
 
                 // DRAW ISLANDS under the towns: outlines once they're big enough to tell apart,
                 // and the free town slots as hollow circles closer still
-                if self.ui_data.settings_islands.enabled && island_outlines {
-                    let (fill, stroke) = island_paint(self.ui_data.settings_islands.color, false);
+                if island_outlines {
                     for island in &visible_islands {
+                        let (fill, stroke) = island_paint(island_settings(island).color, false);
                         painter.add(egui::Shape::convex_polygon(
                             island_outline(canvas_data, island),
                             fill,
@@ -410,12 +433,15 @@ impl View {
                         ));
                     }
                     if canvas_data.zoom >= FREE_SLOT_ZOOM {
-                        for slot in visible_islands.iter().flat_map(|i| i.free_slot_positions()) {
-                            painter.circle_stroke(
-                                canvas_data.world_to_screen(slot.to_vec2()).to_pos2(),
-                                1.0 + canvas_data.scale_world_to_screen(0.15),
-                                egui::Stroke::new(1.0, self.ui_data.settings_islands.color),
-                            );
+                        for island in &visible_islands {
+                            let stroke = egui::Stroke::new(1.0, island_settings(island).color);
+                            for slot in island.free_slot_positions() {
+                                painter.circle_stroke(
+                                    canvas_data.world_to_screen(slot.to_vec2()).to_pos2(),
+                                    1.0 + canvas_data.scale_world_to_screen(0.15),
+                                    stroke,
+                                );
+                            }
                         }
                     }
                 }
@@ -642,28 +668,35 @@ impl View {
                                 }
                             }
                         }
-                        if self.ui_data.settings_islands.enabled && island_outlines {
-                            let (fill, stroke) =
-                                island_paint(self.ui_data.settings_islands.color, false);
-                            scene.polygons(
-                                fill,
-                                stroke,
-                                visible_islands
-                                    .iter()
-                                    .map(|island| island_outline(canvas_data, island)),
-                            );
-                            if canvas_data.zoom >= FREE_SLOT_ZOOM {
-                                scene.rings(
-                                    self.ui_data.settings_islands.color,
-                                    1.0 + town_radius,
-                                    1.0,
-                                    visible_islands
-                                        .iter()
-                                        .flat_map(|i| i.free_slot_positions())
-                                        .map(|slot| {
-                                            canvas_data.world_to_screen(slot.to_vec2()).to_pos2()
-                                        }),
+                        if island_outlines {
+                            for (group, resource_islands) in
+                                [(settings_resource_islands, true), (settings_rocks, false)]
+                            {
+                                let islands = || {
+                                    visible_islands.iter().filter(move |island| {
+                                        island.is_resource_island() == resource_islands
+                                    })
+                                };
+                                let (fill, stroke) = island_paint(group.color, false);
+                                scene.polygons(
+                                    fill,
+                                    stroke,
+                                    islands().map(|island| island_outline(canvas_data, island)),
                                 );
+                                if canvas_data.zoom >= FREE_SLOT_ZOOM {
+                                    scene.rings(
+                                        group.color,
+                                        1.0 + town_radius,
+                                        1.0,
+                                        islands().flat_map(|i| i.free_slot_positions()).map(
+                                            |slot| {
+                                                canvas_data
+                                                    .world_to_screen(slot.to_vec2())
+                                                    .to_pos2()
+                                            },
+                                        ),
+                                    );
+                                }
                             }
                         }
                         for selection in &self.ui_data.selections {

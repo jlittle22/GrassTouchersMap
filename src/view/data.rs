@@ -22,11 +22,20 @@ pub const ALL_TOWNS_DARK: egui::Color32 = egui::Color32::from_gray(60);
 pub const ALL_TOWNS_LIGHT: egui::Color32 = egui::Color32::from_gray(180);
 /// island outlines, a muted sea-ish gray that reads on dark and light backgrounds
 pub const ISLANDS: egui::Color32 = egui::Color32::from_rgb(88, 112, 128);
+/// rock outlines, a muted sandy gray to tell them apart from the resource islands
+pub const ROCKS: egui::Color32 = egui::Color32::from_rgb(128, 116, 96);
 
-fn default_settings_islands() -> DefaultTownGroup {
+fn default_settings_resource_islands() -> DefaultTownGroup {
     DefaultTownGroup {
         enabled: true,
         color: ISLANDS,
+    }
+}
+
+fn default_settings_rocks() -> DefaultTownGroup {
+    DefaultTownGroup {
+        enabled: true,
+        color: ROCKS,
     }
 }
 
@@ -48,9 +57,16 @@ pub struct Data {
 
     pub settings_all: DefaultTownGroup,
     pub settings_ghosts: DefaultTownGroup,
-    /// island outlines and free slots, drawn under the towns once zoomed in
-    #[serde(default = "default_settings_islands")]
-    pub settings_islands: DefaultTownGroup,
+    /// outlines and free slots of the 20 slot resource islands, drawn under the towns once
+    /// zoomed in. Saved as `settings_islands` before the rocks got their own toggle.
+    #[serde(
+        default = "default_settings_resource_islands",
+        alias = "settings_islands"
+    )]
+    pub settings_resource_islands: DefaultTownGroup,
+    /// like `settings_resource_islands`, for the rocks with fewer slots
+    #[serde(default = "default_settings_rocks")]
+    pub settings_rocks: DefaultTownGroup,
 
     pub selections: Vec<TownSelection>,
 
@@ -108,7 +124,8 @@ impl Default for Data {
                 enabled: true,
                 color: ALL_TOWNS_DARK,
             },
-            settings_islands: default_settings_islands(),
+            settings_resource_islands: default_settings_resource_islands(),
+            settings_rocks: default_settings_rocks(),
             #[cfg(not(target_arch = "wasm32"))]
             saved_db: BTreeMap::new(),
             history_selected: None,
@@ -240,5 +257,25 @@ impl ViewPortFilter {
 
     pub fn y_in_viewport(&self, y: f32) -> bool {
         self.world_t < y && y < self.world_b
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_island_settings_load_as_resource_islands() {
+        let mut value = serde_json::to_value(Data::default()).unwrap();
+        let fields = value.as_object_mut().unwrap();
+        let mut islands = fields.remove("settings_resource_islands").unwrap();
+        islands["enabled"] = serde_json::Value::Bool(false);
+        fields.insert(String::from("settings_islands"), islands);
+        fields.remove("settings_rocks");
+
+        let data: Data = serde_json::from_value(value).unwrap();
+        assert!(!data.settings_resource_islands.enabled);
+        assert!(data.settings_rocks.enabled);
+        assert_eq!(data.settings_rocks.color, ROCKS);
     }
 }

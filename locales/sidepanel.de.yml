@@ -27,4 +27,5 @@ sidepanel:
   town_toggle:
     all: "Alle Städte:"
     ghosts: "Geisterstädte:"
-    islands: "Inseln:"
+    resource_islands: "Rohstoffinseln:"
+    rocks: "Felsen:"
